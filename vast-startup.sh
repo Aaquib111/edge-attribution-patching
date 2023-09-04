@@ -1,12 +1,10 @@
-apt-get update && apt-get upgrade
+apt update && apt upgrade
 git init
-git remote set-url origin https://Aaquib111:[TOKEN]@github.com/Aaquib111/acdcpp.git
-git config --global user.name [INSERT NAME]
-git config --global user.email [INSERT EMAIL]
-git config --global github.user [INSERT USERNAME]
-git config --global github.token [INSERT TOKEN]
-git clone https://github.com/Aaquib111/acdcpp.git
-cd acdcpp
+git remote set-url origin https://Aaquib111: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@github.com/Aaquib111/acdcpp.git
+git config --global user.name Aaquib111
+git config --global user.email aaquibahm@gmail.com 
+git config --global github.user Aaquib111 
+git config --global github.token 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
 apt install graphviz
 apt install graphviz-dev
 pip install git+https://github.com/ArthurConmy/Automatic-Circuit-Discovery.git
