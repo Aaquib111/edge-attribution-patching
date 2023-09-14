@@ -1,6 +1,6 @@
-github_username=Aaquib111
-github_token=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
-email=aaquibahm@gmail.com
+github_username=# INSERT USERNAME
+github_token=# INSERT TOKEN
+email= # INSERT EMAIL
 
 apt update && apt upgrade
 
