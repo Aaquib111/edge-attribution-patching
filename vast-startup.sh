@@ -21,4 +21,5 @@ git submodule init
 git submodule update
 git pull origin master
 
+pip install plotly transformer_lens pygraphviz
 pip install -r requirements.txt
