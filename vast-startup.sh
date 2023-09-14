@@ -5,7 +5,7 @@ email=aaquibahm@gmail.com
 apt update && apt upgrade
 
 git init
-git remote set-url origin https://Aaquib111:$github_token@github.com//acdcpp.git
+git remote set-url origin https://$github_username:$github_token@github.com/Aaquib111/acdcpp.git
 git config --global user.name $github_username
 git config --global user.email $email
 git config --global github.user $github_username 
