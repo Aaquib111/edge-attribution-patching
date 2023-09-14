@@ -1,6 +1,6 @@
-github_username=# INSERT USERNAME HERE
-github_token=#INSERT TOKEN HERE
-email=# INSERT EMAIL HERE
+github_username=Aaquib111
+github_token=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
+email=aaquibahm@gmail.com
 
 apt update && apt upgrade
 
@@ -21,4 +21,5 @@ git submodule init
 git submodule update
 git pull origin master
 
+pip install plotly transformer_lens pygraphviz
 pip install -r requirements.txt

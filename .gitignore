@@ -1,4 +1,8 @@
 env/*
 .ipynb_checkpoints/*
 __pycache__/*
+utils/.ipynb_checkpoints/*
+utils/__pycache__/*
+ioi_task/.ipynb_checkpoints/*
+ioi_task/__pycache__/*
 ims/*
