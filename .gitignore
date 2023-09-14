@@ -6,3 +6,4 @@ utils/__pycache__/*
 ioi_task/.ipynb_checkpoints/*
 ioi_task/__pycache__/*
 ims/*
+.python-version
