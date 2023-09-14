@@ -15,6 +15,7 @@ import tqdm.notebook as tqdm
 from jaxtyping import Bool
 from typing import Callable, Tuple 
 
+from utils.graphics_utils import get_node_name
 
 def remove_redundant_node(exp, node, safe=True, allow_fails=True):
         if safe:

@@ -23,6 +23,7 @@ class ACDCPPExperiment():
         acdcpp_metric: Callable[[Tensor], Tensor],
         thresholds: List[float],
         run_name: str,
+        save_graphs_after: float,
         verbose: bool = False,
         attr_absolute_val: bool = True,
         zero_ablation: bool = False,
@@ -37,7 +38,8 @@ class ACDCPPExperiment():
         self.corr_data = corr_data
 
         self.run_name = run_name
-
+        self.verbose = verbose
+        
         self.acdc_metric = acdc_metric
         self.acdcpp_metric = acdcpp_metric
 
@@ -49,6 +51,7 @@ class ACDCPPExperiment():
         self.return_pruned_heads = return_pruned_heads
         self.return_pruned_attr = return_pruned_attr
         self.return_num_passes = return_num_passes
+        self.save_graphs_after = save_graphs_after
 
         self.acdc_args = acdc_kwargs
         if verbose:
@@ -63,6 +66,8 @@ class ACDCPPExperiment():
             ref_ds=self.corr_data,
             metric=self.acdc_metric,
             zero_ablation=self.zero_ablation,
+            online_cache_cpu=False,
+            corrupted_cache_cpu=False,
             **self.acdc_args
         )
         exp.model.reset_hooks()
@@ -75,6 +80,9 @@ class ACDCPPExperiment():
         return exp
     
     def run_acdcpp(self, exp: TLACDCExperiment, threshold: float):
+        if self.verbose:
+            print('Running ACDC++')
+            
         for _ in range(10):
             pruned_nodes_attr = acdc_nodes(
                 model=exp.model,
@@ -89,6 +97,9 @@ class ACDCPPExperiment():
         return (get_nodes(exp.corr), pruned_nodes_attr)
 
     def run_acdc(self, exp: TLACDCExperiment):
+        if self.verbose:
+            print('Running ACDC')
+            
         while exp.current_node:
             exp.step(testing=False)
 
@@ -105,13 +116,16 @@ class ACDCPPExperiment():
             exp = self.setup_exp(threshold)
             acdcpp_heads, attrs = self.run_acdcpp(exp, threshold)
 
-            if save_after_acdcpp:
+            if threshold >= self.save_graphs_after:
+                print('Saving ACDC++ Graph')
                 show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_before_acdc.png')
             
             acdc_heads, passes = self.run_acdc(exp)
 
-            if save_after_acdc:
+            if threshold >= self.save_graphs_after:
+                print('Saving ACDC Graph')
                 show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_after_acdc.png')
+                
             pruned_heads[threshold] = (acdcpp_heads, acdc_heads)
             num_passes[threshold] = passes
             pruned_attrs[threshold] = attrs
