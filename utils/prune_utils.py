@@ -173,6 +173,7 @@ def acdc_nodes(model: HookedTransformer,
               metric: Callable[[Tensor], Tensor],
               threshold: float,
               exp: TLACDCExperiment,
+              verbose: bool = False,
               attr_absolute_val: bool = False) -> Tuple[
                   HookedTransformer, Bool[Tensor, 'n_layer n_heads']]:
     '''
@@ -216,14 +217,17 @@ def acdc_nodes(model: HookedTransformer,
     for layer, head in itertools.product(range(model.cfg.n_layers), range(model.cfg.n_heads)):
         if should_prune[layer, head]:
             # REMOVING NODE
-            print(f'PRUNING L{layer}H{head} with attribution {node_attr[layer, head]}')
+            if verbose:
+                print(f'PRUNING L{layer}H{head} with attribution {node_attr[layer, head]}')
             # Find the corresponding node in computation graph
             node = find_attn_node(exp, layer, head)
-            print(f'\tFound node {node.name}')
+            if verbose:
+                print(f'\tFound node {node.name}')
             # Prune node
             remove_node(exp, node)
-            print(f'\tRemoved node {node.name}')
-            pruned_nodes_attr[(layer, head)] = node_attr[layer, head]
+            if verbose:
+                print(f'\tRemoved node {node.name}')
+            pruned_nodes_attr[(layer, head)] = node_attr[layer, head].item()
             
             # REMOVING QKV
             qkv_nodes = find_attn_node_qkv(exp, layer, head)

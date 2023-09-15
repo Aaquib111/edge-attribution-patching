@@ -12,6 +12,8 @@ from transformer_lens import HookedTransformer
 import torch as t
 from torch import Tensor
 
+from tqdm import tqdm
+
 class ACDCPPExperiment():
 
     def __init__(
@@ -66,8 +68,10 @@ class ACDCPPExperiment():
             ref_ds=self.corr_data,
             metric=self.acdc_metric,
             zero_ablation=self.zero_ablation,
+            save_graphs_after=self.save_graphs_after,
             online_cache_cpu=False,
             corrupted_cache_cpu=False,
+            verbose=self.verbose,
             **self.acdc_args
         )
         exp.model.reset_hooks()
@@ -91,6 +95,7 @@ class ACDCPPExperiment():
                 metric=self.acdcpp_metric, 
                 threshold=threshold,
                 exp=exp,
+                verbose=self.verbose,
                 attr_absolute_val=self.attr_absolute_val
             )
             t.cuda.empty_cache()
@@ -112,21 +117,24 @@ class ACDCPPExperiment():
         num_passes = {}
         pruned_attrs = {}
 
-        for threshold in self.thresholds:
+        for threshold in tqdm(self.thresholds):
             exp = self.setup_exp(threshold)
             acdcpp_heads, attrs = self.run_acdcpp(exp, threshold)
 
+            # Only applying threshold to this one as these graphs tend to be HUGE
             if threshold >= self.save_graphs_after:
                 print('Saving ACDC++ Graph')
                 show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_before_acdc.png')
             
             acdc_heads, passes = self.run_acdc(exp)
 
-            if threshold >= self.save_graphs_after:
-                print('Saving ACDC Graph')
-                show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_after_acdc.png')
+            print('Saving ACDC Graph')
+            show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_after_acdc.png')
                 
-            pruned_heads[threshold] = (acdcpp_heads, acdc_heads)
+            pruned_heads[threshold] = [acdcpp_heads, acdc_heads]
             num_passes[threshold] = passes
             pruned_attrs[threshold] = attrs
+            del exp
+            t.cuda.empty_cache()
+        t.cuda.empty_cache()
         return pruned_heads, num_passes, pruned_attrs
