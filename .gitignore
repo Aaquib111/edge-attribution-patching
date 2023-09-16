@@ -9,3 +9,7 @@ ims/*.png
 ioi_task/ims/*.png
 docstring_task/ims/*.png
 .python-version
+ims/*
+.python-version
+greaterthan_task/greaterthan_ims/*
+
