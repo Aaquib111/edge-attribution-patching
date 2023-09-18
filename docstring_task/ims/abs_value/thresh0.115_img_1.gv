@@ -1,0 +1,40 @@
+strict digraph "" {
+	graph [bgcolor=transparent,
+		layout=dot,
+		overlap=false,
+		splines=true
+	];
+	"<a3.7>"	[color=black,
+		fillcolor="#462258",
+		fontname=Helvetica,
+		shape=box,
+		style="filled, rounded"];
+	"<resid_post>"	[color=black,
+		fillcolor="#fe713b",
+		fontname=Helvetica,
+		shape=box,
+		style="filled, rounded"];
+	"<a3.7>" -> "<resid_post>"	[color="#462258",
+		penwidth=0.6];
+	"<a3.6>"	[color=black,
+		fillcolor="#2e2c06",
+		fontname=Helvetica,
+		shape=box,
+		style="filled, rounded"];
+	"<a3.6>" -> "<resid_post>"	[color="#2e2c06",
+		penwidth=4.746312499046326];
+	"<a3.0>"	[color=black,
+		fillcolor="#7a3754",
+		fontname=Helvetica,
+		shape=box,
+		style="filled, rounded"];
+	"<a3.0>" -> "<resid_post>"	[color="#7a3754",
+		penwidth=4.896343111991882];
+	"<a2.3>"	[color=black,
+		fillcolor="#30be28",
+		fontname=Helvetica,
+		shape=box,
+		style="filled, rounded"];
+	"<a2.3>" -> "<resid_post>"	[color="#30be28",
+		penwidth=0.6];
+}
