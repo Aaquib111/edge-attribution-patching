@@ -5,5 +5,7 @@ utils/.ipynb_checkpoints/*
 utils/__pycache__/*
 ioi_task/.ipynb_checkpoints/*
 ioi_task/__pycache__/*
-ims/*
+ims/*.png
+ioi_task/ims/*.png
+docstring_task/ims/*.png
 .python-version
