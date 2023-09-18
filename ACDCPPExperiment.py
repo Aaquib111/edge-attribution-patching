@@ -32,6 +32,7 @@ class ACDCPPExperiment():
         return_pruned_heads: bool = True,
         return_pruned_attr: bool = True,
         return_num_passes: bool = True,
+        pass_tokens_to_metric: bool = False,
         **acdc_kwargs
     ):
         self.model = model
@@ -44,6 +45,7 @@ class ACDCPPExperiment():
         
         self.acdc_metric = acdc_metric
         self.acdcpp_metric = acdcpp_metric
+        self.pass_tokens_to_metric = pass_tokens_to_metric
 
         self.thresholds = thresholds 
         self.attr_absolute_val = attr_absolute_val
@@ -68,10 +70,11 @@ class ACDCPPExperiment():
             ref_ds=self.corr_data,
             metric=self.acdc_metric,
             zero_ablation=self.zero_ablation,
-            save_graphs_after=self.save_graphs_after,
+            # save_graphs_after=self.save_graphs_after,
             online_cache_cpu=False,
             corrupted_cache_cpu=False,
             verbose=self.verbose,
+            pass_tokens_to_metric=self.pass_tokens_to_metric,
             **self.acdc_args
         )
         exp.model.reset_hooks()
@@ -96,7 +99,8 @@ class ACDCPPExperiment():
                 threshold=threshold,
                 exp=exp,
                 verbose=self.verbose,
-                attr_absolute_val=self.attr_absolute_val
+                attr_absolute_val=self.attr_absolute_val,
+                pass_tokens_to_metric=self.pass_tokens_to_metric
             )
             t.cuda.empty_cache()
         return (get_nodes(exp.corr), pruned_nodes_attr)

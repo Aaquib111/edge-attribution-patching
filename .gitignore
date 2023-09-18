@@ -11,5 +11,5 @@ docstring_task/ims/*.png
 .python-version
 ims/*
 .python-version
-greaterthan_task/greaterthan_ims/*
+greaterthan_task/ims/*
 
