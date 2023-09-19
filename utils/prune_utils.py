@@ -13,7 +13,7 @@ from transformer_lens import HookedTransformer, ActivationCache
 import tqdm.notebook as tqdm
 
 from jaxtyping import Bool
-from typing import Callable, Tuple 
+from typing import Callable, Tuple, Literal
 
 from utils.graphics_utils import get_node_name
 
@@ -102,7 +102,9 @@ def split_layers_and_heads(act: Tensor, model: HookedTransformer) -> Tensor:
                             head=model.cfg.n_heads)
 
 hook_filter = lambda name: name.endswith("ln1.hook_normalized") or name.endswith("attn.hook_result")
-def get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=False):
+head_input_filter = lambda name: name.endswith(("hook_q_input", "hook_k_input", "hook_v_input"))
+
+def get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=False, mode: Literal["node", "edge"]="node"):
     # cache the activations and gradients of the clean inputs
     model.reset_hooks()
     clean_cache = {}
@@ -117,7 +119,7 @@ def get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_met
     def backward_cache_hook(act, hook):
         clean_grad_cache[hook.name] = act.detach()
 
-    model.add_hook(hook_filter, backward_cache_hook, "bwd")
+    model.add_hook(hook_filter if mode=="node" else head_input_filter, backward_cache_hook, "bwd")
 
     if pass_tokens_to_metric:
         value = metric(model(clean_input), clean_input)
