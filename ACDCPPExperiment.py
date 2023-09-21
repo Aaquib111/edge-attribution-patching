@@ -74,7 +74,6 @@ class ACDCPPExperiment():
             online_cache_cpu=False,
             corrupted_cache_cpu=False,
             verbose=self.verbose,
-            pass_tokens_to_metric=self.pass_tokens_to_metric,
             **self.acdc_args
         )
         exp.model.reset_hooks()
@@ -100,7 +99,6 @@ class ACDCPPExperiment():
                 exp=exp,
                 verbose=self.verbose,
                 attr_absolute_val=self.attr_absolute_val,
-                pass_tokens_to_metric=self.pass_tokens_to_metric
             )
             t.cuda.empty_cache()
         return (get_nodes(exp.corr), pruned_nodes_attr)
