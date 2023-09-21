@@ -1,6 +1,7 @@
 import sys
 sys.path.append('Automatic-Circuit-Discovery/')
 
+import torch
 from acdc.TLACDCExperiment import TLACDCExperiment
 from acdc.acdc_utils import TorchIndex, EdgeType
 import torch as t
@@ -174,15 +175,15 @@ def get_nodes(correspondence):
     return nodes
 
 def acdc_nodes(model: HookedTransformer,
-              clean_input: Tensor,
-              corrupted_input: Tensor,
-              metric: Callable[[Tensor], Tensor],
-              threshold: float,
-              exp: TLACDCExperiment,
-              pass_tokens_to_metric = False,
-              verbose: bool = False,
-              attr_absolute_val: bool = False) -> Tuple[
-                  HookedTransformer, Bool[Tensor, 'n_layer n_heads']]:
+    clean_input: Tensor,
+    corrupted_input: Tensor,
+    metric: Callable[[Tensor], Tensor],
+    threshold: float,
+    exp: TLACDCExperiment,
+    pass_tokens_to_metric = False,
+    verbose: bool = False,
+    attr_absolute_val: bool = False,
+) -> Tuple[HookedTransformer, Bool[Tensor, 'n_layer n_heads']]:
     '''
     Runs attribution-patching-based ACDC on the model, using the given metric and data.
     Returns the pruned model, and which heads were pruned.
@@ -197,7 +198,7 @@ def acdc_nodes(model: HookedTransformer,
         attr_absolute_val: whether to take the absolute value of the attribution before thresholding
     '''
     # get the 2 fwd and 1 bwd caches; cache "normalized" and "result" of attn layers
-    clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=pass_tokens_to_metric)
+    clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=pass_tokens_to_metric, mode = "node" if exp.positions == [None] else "edge")
 
     # compute first-order Taylor approximation for each node to get the attribution
     clean_head_act = clean_cache.stack_head_results()
@@ -221,23 +222,40 @@ def acdc_nodes(model: HookedTransformer,
     # prune all nodes whose attribution is below the threshold
     should_prune = node_attr < threshold
     pruned_nodes_attr = {}
-    for layer, head in itertools.product(range(model.cfg.n_layers), range(model.cfg.n_heads)):
-        if should_prune[layer, head]:
-            # REMOVING NODE
-            if verbose:
-                print(f'PRUNING L{layer}H{head} with attribution {node_attr[layer, head]}')
-            # Find the corresponding node in computation graph
-            node = find_attn_node(exp, layer, head)
-            if verbose:
-                print(f'\tFound node {node.name}')
-            # Prune node
-            remove_node(exp, node)
-            if verbose:
-                print(f'\tRemoved node {node.name}')
-            pruned_nodes_attr[(layer, head)] = node_attr[layer, head].item()
-            
-            # REMOVING QKV
-            qkv_nodes = find_attn_node_qkv(exp, layer, head)
-            for node in qkv_nodes:
+
+    if exp.positions == [None]:
+        # We're not splitting by position
+        for layer, head in itertools.product(range(model.cfg.n_layers), range(model.cfg.n_heads)):
+            if should_prune[layer, head]:
+                # REMOVING NODE
+                if verbose:
+                    print(f'PRUNING L{layer}H{head} with attribution {node_attr[layer, head]}')
+                # Find the corresponding node in computation graph
+                node = find_attn_node(exp, layer, head)
+                if verbose:
+                    print(f'\tFound node {node.name}')
+                # Prune node
                 remove_node(exp, node)
-    return pruned_nodes_attr
+                if verbose:
+                    print(f'\tRemoved node {node.name}')
+                pruned_nodes_attr[(layer, head)] = node_attr[layer, head].item()
+                
+                # REMOVING QKV
+                qkv_nodes = find_attn_node_qkv(exp, layer, head)
+                for node in qkv_nodes:
+                    remove_node(exp, node)
+        return pruned_nodes_attr
+    
+    else:    
+        stacked_grad_act = t.zeros(
+            3, # QKV
+            model.cfg.n_layers,
+            model.cfg.n_heads,
+            clean_head_act.shape[-3], # Batch
+            clean_head_act.shape[-2], # Seq
+            clean_head_act.shape[-1], # D
+        )
+
+        for letter_idx, letter in enumerate("qkv"):
+            for layer_idx in range(model.cfg.n_layers):
+                stacked_grad_act[letter_idx, layer_idx] = einops.rearrange(clean_grad_cache[f"blocks.{layer_idx}.hook_{letter}_input"], "batch seq n_heads d -> n_heads batch seq d")
