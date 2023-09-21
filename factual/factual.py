@@ -292,7 +292,7 @@ for _ in range(N_TIMES):
         metric=factual_recall_metric,
         threshold=0.1*threshold,
         exp=exp,
-        verbose=False,
+        verbose=True,
         attr_absolute_val=True,
         mode="edge",
     ) # TODO this seems to remove nodes from direct connections, but not otherwise?!

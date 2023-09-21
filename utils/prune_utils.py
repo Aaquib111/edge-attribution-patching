@@ -273,11 +273,13 @@ def acdc_nodes(model: HookedTransformer,
             should_prune = current_result < threshold
 
             if should_prune:
-                if verbose:
-                    print(f'PRUNING {upstream_component=} {downstream_component=} with attribution {current_result}')
                 edge_tuple = (downstream_component.hook_point_name, downstream_component.index, upstream_component.hook_point_name, upstream_component.index)
                 exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
                 exp.corr.remove_edge(*edge_tuple)
+
+            else:
+                if verbose: # Putting this here since tons of things get pruned when doing edges!
+                    print(f'NOT PRUNING {upstream_component=} {downstream_component=} with attribution {current_result}')
 
         return results
     
