@@ -1,6 +1,6 @@
 import sys
 sys.path.append('Automatic-Circuit-Discovery/')
-
+from tqdm import tqdm
 import torch
 from acdc.TLACDCExperiment import TLACDCExperiment
 from acdc.acdc_utils import TorchIndex, EdgeType
@@ -11,12 +11,12 @@ import itertools
 
 from transformer_lens import HookedTransformer, ActivationCache
 
-import tqdm.notebook as tqdm
-
 from jaxtyping import Bool
-from typing import Callable, Tuple, Literal
-
+from typing import Callable, Tuple, Literal, Dict, Optional, List, Union, Set
 from utils.graphics_utils import get_node_name
+from typing import NamedTuple
+
+ModelComponent = NamedTuple("ModelComponent", [("hook_point_name", str), ("index", TorchIndex)]) # Abstraction for a node in the computational graph. TODO: move this into ACDC repo when standardised
 
 def remove_redundant_node(exp, node, safe=True, allow_fails=True):
         if safe:
@@ -103,7 +103,6 @@ def split_layers_and_heads(act: Tensor, model: HookedTransformer) -> Tensor:
                             head=model.cfg.n_heads)
 
 hook_filter = lambda name: name.endswith("ln1.hook_normalized") or name.endswith("attn.hook_result")
-head_input_filter = lambda name: name.endswith(("hook_q_input", "hook_k_input", "hook_v_input"))
 
 def get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=False, mode: Literal["node", "edge"]="node"):
     # cache the activations and gradients of the clean inputs
@@ -113,14 +112,15 @@ def get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_met
     def forward_cache_hook(act, hook):
         clean_cache[hook.name] = act.detach()
 
-    model.add_hook(hook_filter, forward_cache_hook, "fwd")
+    edge_acdcpp_outgoing_filter = lambda name: name.endswith(("hook_result", "hook_mlp_out", "blocks.0.hook_resid_pre"))
+    model.add_hook(hook_filter if mode == "node" else edge_acdcpp_outgoing_filter, forward_cache_hook, "fwd")
 
     clean_grad_cache = {}
 
     def backward_cache_hook(act, hook):
         clean_grad_cache[hook.name] = act.detach()
-
-    model.add_hook(hook_filter if mode=="node" else head_input_filter, backward_cache_hook, "bwd")
+    edge_acdcpp_incoming_filter = lambda name: name.endswith(("hook_q_input", "hook_k_input", "hook_v_input", "hook_mlp_in", f"blocks.{model.cfg.n_layers-1}.hook_resid_post"))
+    model.add_hook(hook_filter if mode=="node" else edge_acdcpp_incoming_filter, backward_cache_hook, "bwd")
 
     if pass_tokens_to_metric:
         value = metric(model(clean_input), clean_input)
@@ -133,10 +133,10 @@ def get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_met
     model.reset_hooks()
     corrupted_cache = {}
 
-    def forward_cache_hook(act, hook):
+    def forward_corrupted_cache_hook(act, hook):
         corrupted_cache[hook.name] = act.detach()
 
-    model.add_hook(hook_filter, forward_cache_hook, "fwd")
+    model.add_hook(hook_filter if mode == "node" else edge_acdcpp_outgoing_filter, forward_corrupted_cache_hook, "fwd")
     model(corrupted_input)
     model.reset_hooks()
 
@@ -183,7 +183,8 @@ def acdc_nodes(model: HookedTransformer,
     pass_tokens_to_metric = False,
     verbose: bool = False,
     attr_absolute_val: bool = False,
-) -> Tuple[HookedTransformer, Bool[Tensor, 'n_layer n_heads']]:
+    mode: Literal["node", "edge"]="node",
+) -> Dict: # TODO label this dict more precisely for the edge vs node methods
     '''
     Runs attribution-patching-based ACDC on the model, using the given metric and data.
     Returns the pruned model, and which heads were pruned.
@@ -198,33 +199,32 @@ def acdc_nodes(model: HookedTransformer,
         attr_absolute_val: whether to take the absolute value of the attribution before thresholding
     '''
     # get the 2 fwd and 1 bwd caches; cache "normalized" and "result" of attn layers
-    clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=pass_tokens_to_metric, mode = "node" if exp.positions == [None] else "edge")
+    clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=pass_tokens_to_metric, mode=mode)
 
-    # compute first-order Taylor approximation for each node to get the attribution
-    clean_head_act = clean_cache.stack_head_results()
-    corr_head_act = corrupted_cache.stack_head_results()
-    clean_grad_act = clean_grad_cache.stack_head_results()
+    if mode == "node":
+        # compute first-order Taylor approximation for each node to get the attribution
+        clean_head_act = clean_cache.stack_head_results()
+        corr_head_act = corrupted_cache.stack_head_results()
+        clean_grad_act = clean_grad_cache.stack_head_results()
 
-    # compute attributions of each node
-    node_attr = (clean_head_act - corr_head_act) * clean_grad_act
-    # separate layers and heads, sum over d_model (to complete the dot product), batch, and seq
-    node_attr = split_layers_and_heads(node_attr, model).sum((2, 3, 4))
+        # compute attributions of each node
+        node_attr = (clean_head_act - corr_head_act) * clean_grad_act
+        # separate layers and heads, sum over d_model (to complete the dot product), batch, and seq
+        node_attr = split_layers_and_heads(node_attr, model).sum((2, 3, 4))
 
-    if attr_absolute_val:
-        node_attr = node_attr.abs()
-    del clean_cache
-    del clean_head_act
-    del corrupted_cache
-    del corr_head_act
-    del clean_grad_cache
-    del clean_grad_act
-    t.cuda.empty_cache()
-    # prune all nodes whose attribution is below the threshold
-    should_prune = node_attr < threshold
-    pruned_nodes_attr = {}
+        if attr_absolute_val:
+            node_attr = node_attr.abs()
+        del clean_cache
+        del clean_head_act
+        del corrupted_cache
+        del corr_head_act
+        del clean_grad_cache
+        del clean_grad_act
+        t.cuda.empty_cache()
+        # prune all nodes whose attribution is below the threshold
+        should_prune = node_attr < threshold
+        pruned_nodes_attr = {}
 
-    if exp.positions == [None]:
-        # We're not splitting by position
         for layer, head in itertools.product(range(model.cfg.n_layers), range(model.cfg.n_heads)):
             if should_prune[layer, head]:
                 # REMOVING NODE
@@ -246,16 +246,40 @@ def acdc_nodes(model: HookedTransformer,
                     remove_node(exp, node)
         return pruned_nodes_attr
     
-    else:    
-        stacked_grad_act = t.zeros(
-            3, # QKV
-            model.cfg.n_layers,
-            model.cfg.n_heads,
-            clean_head_act.shape[-3], # Batch
-            clean_head_act.shape[-2], # Seq
-            clean_head_act.shape[-1], # D
-        )
+    elif mode=="edge":
+        # Setup the upstream components
+        upstream_components: List[ModelComponent] = [ModelComponent(hook_point_name=node.name, index=node.index) for node in exp.corr.nodes() if node.name.endswith(("_embed", "attn.hook_result", "mlp_out"))]
+        downstream_components: List[ModelComponent] = [ModelComponent(hook_point_name=node.name, index=node.index) for node in exp.corr.nodes() if node.name.endswith(("k_input", "q_input", "v_input", "mlp_in", "resid_post"))]
 
-        for letter_idx, letter in enumerate("qkv"):
-            for layer_idx in range(model.cfg.n_layers):
-                stacked_grad_act[letter_idx, layer_idx] = einops.rearrange(clean_grad_cache[f"blocks.{layer_idx}.hook_{letter}_input"], "batch seq n_heads d -> n_heads batch seq d")
+        results: Dict[Tuple[ModelComponent, ModelComponent], float] = {}
+        
+        for upstream_component, downstream_component in tqdm(list(itertools.product(
+            upstream_components,
+            downstream_components,
+        ))):
+            if "." in upstream_component.hook_point_name and "." in downstream_component.hook_point_name: # hook_embed and hook_pos_embed have no . but should always be connected anyway
+                upstream_layer = int(upstream_component.hook_point_name.split(".")[1])
+                downstream_layer = int(downstream_component.hook_point_name.split(".")[1])
+                if upstream_layer > downstream_layer:
+                    continue
+                if upstream_layer == downstream_layer and (upstream_component.hook_point_name.endswith("mlp_out") or downstream_component.hook_point_name.endswith(("q_input", "k_input", "v_input"))):
+                    # Other cases where upstream is actually after downstream!
+                    continue
+
+            current_result = (clean_grad_cache[downstream_component.hook_point_name].cpu()[downstream_component.index.as_index] * (clean_cache[upstream_component.hook_point_name].cpu()[upstream_component.index.as_index] - corrupted_cache[upstream_component.hook_point_name].cpu()[upstream_component.index.as_index])).sum()
+            if attr_absolute_val: 
+                current_result = current_result.abs()
+            results[upstream_component, downstream_component] = current_result.item()
+            should_prune = current_result < threshold
+
+            if should_prune:
+                if verbose:
+                    print(f'PRUNING {upstream_component=} {downstream_component=} with attribution {current_result}')
+                edge_tuple = (downstream_component.hook_point_name, downstream_component.index, upstream_component.hook_point_name, upstream_component.index)
+                exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
+                exp.corr.remove_edge(*edge_tuple)
+
+        return results
+    
+    else:
+        raise Exception(f"Mode {mode} not supported")

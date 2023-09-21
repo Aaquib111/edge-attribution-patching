@@ -265,7 +265,8 @@ exp = TLACDCExperiment(
     corrupted_cache_cpu=False,
     verbose=True,
     add_sender_hooks=True,
-    positions = None if (model.cfg.model_name!="gpt2-xl" and not TESTING) else list(range(clean_toks.shape[-1])), 
+    positions = None,
+    # positions = None if (model.cfg.model_name!="gpt2-xl" and not TESTING) else list(range(clean_toks.shape[-1])), 
 )
 print('Setting up graph')
 
@@ -289,10 +290,11 @@ for _ in range(N_TIMES):
         clean_input=clean_toks,
         corrupted_input=corr_toks,
         metric=factual_recall_metric,
-        threshold=threshold,
+        threshold=0.1*threshold,
         exp=exp,
-        verbose=True,
+        verbose=False,
         attr_absolute_val=True,
+        mode="edge",
     ) # TODO this seems to remove nodes from direct connections, but not otherwise?!
     t.cuda.empty_cache()
 acdcpp_time = time()
