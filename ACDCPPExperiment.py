@@ -34,6 +34,7 @@ class ACDCPPExperiment():
         return_num_passes: bool = True,
         pass_tokens_to_metric: bool = False,
         pruning_mode: Literal["edge", "node"] = "node",
+        no_pruned_nodes_attr: int = 10,
         **acdc_kwargs
     ):
         self.model = model
@@ -58,6 +59,7 @@ class ACDCPPExperiment():
         self.return_num_passes = return_num_passes
         self.save_graphs_after = save_graphs_after
         self.pruning_mode: Literal["edge", "node"] = pruning_mode
+        self.no_pruned_nodes_attr = no_pruned_nodes_attr
 
         self.acdc_args = acdc_kwargs
         if verbose:
@@ -91,7 +93,7 @@ class ACDCPPExperiment():
         if self.verbose:
             print('Running ACDC++')
             
-        for _ in range(10):
+        for _ in range(self.no_pruned_nodes_attr):
             pruned_nodes_attr = acdc_nodes(
                 model=exp.model,
                 clean_input=self.clean_data,

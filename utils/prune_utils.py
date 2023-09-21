@@ -120,7 +120,10 @@ def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["nod
     def backward_cache_hook(act, hook):
         clean_grad_cache[hook.name] = act.detach()
 
-    edge_acdcpp_incoming_filter = lambda name: name.endswith(("hook_q_input", "hook_k_input", "hook_v_input", "hook_mlp_in", f"blocks.{model.cfg.n_layers-1}.hook_resid_post"))
+    incoming_ends = ["hook_q_input", "hook_k_input", "hook_v_input", f"blocks.{model.cfg.n_layers-1}.hook_resid_post"]
+    if not model.cfg.attn_only:
+        incoming_ends.append("hook_mlp_in")
+    edge_acdcpp_incoming_filter = lambda name: name.endswith(tuple(incoming_ends))
     model.add_hook(hook_filter if mode=="node" else edge_acdcpp_incoming_filter, backward_cache_hook, "bwd")
     value = metric(model(clean_input))
 
