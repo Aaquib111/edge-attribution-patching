@@ -104,7 +104,7 @@ def split_layers_and_heads(act: Tensor, model: HookedTransformer) -> Tensor:
 
 hook_filter = lambda name: name.endswith("ln1.hook_normalized") or name.endswith("attn.hook_result")
 
-def get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=False, mode: Literal["node", "edge"]="node"):
+def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["node", "edge"]="node"):
     # cache the activations and gradients of the clean inputs
     model.reset_hooks()
     clean_cache = {}
@@ -119,13 +119,14 @@ def get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_met
 
     def backward_cache_hook(act, hook):
         clean_grad_cache[hook.name] = act.detach()
-    edge_acdcpp_incoming_filter = lambda name: name.endswith(("hook_q_input", "hook_k_input", "hook_v_input", "hook_mlp_in", f"blocks.{model.cfg.n_layers-1}.hook_resid_post"))
-    model.add_hook(hook_filter if mode=="node" else edge_acdcpp_incoming_filter, backward_cache_hook, "bwd")
 
-    if pass_tokens_to_metric:
-        value = metric(model(clean_input), clean_input)
-    else:
-        value = metric(model(clean_input))
+    incoming_ends = ["hook_q_input", "hook_k_input", "hook_v_input", f"blocks.{model.cfg.n_layers-1}.hook_resid_post"]
+    if not model.cfg.attn_only:
+        incoming_ends.append("hook_mlp_in")
+    edge_acdcpp_incoming_filter = lambda name: name.endswith(tuple(incoming_ends))
+    model.add_hook(hook_filter if mode=="node" else edge_acdcpp_incoming_filter, backward_cache_hook, "bwd")
+    value = metric(model(clean_input))
+
 
     value.backward()
 
@@ -199,7 +200,7 @@ def acdc_nodes(model: HookedTransformer,
         attr_absolute_val: whether to take the absolute value of the attribution before thresholding
     '''
     # get the 2 fwd and 1 bwd caches; cache "normalized" and "result" of attn layers
-    clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=pass_tokens_to_metric, mode=mode)
+    clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric, mode=mode)
 
     if mode == "node":
         # compute first-order Taylor approximation for each node to get the attribution
@@ -256,7 +257,7 @@ def acdc_nodes(model: HookedTransformer,
         for upstream_component, downstream_component in tqdm(list(itertools.product(
             upstream_components,
             downstream_components,
-        ))):
+        ))): # TODO ideally we should batch compute things in this loop
             if "." in upstream_component.hook_point_name and "." in downstream_component.hook_point_name: # hook_embed and hook_pos_embed have no . but should always be connected anyway
                 upstream_layer = int(upstream_component.hook_point_name.split(".")[1])
                 downstream_layer = int(downstream_component.hook_point_name.split(".")[1])
