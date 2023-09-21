@@ -1,7 +1,13 @@
 # In[1]:
 
 """
-Notebook to get factual recall working
+Notebook to get factual recall working.
+
+I'm using this branch
+
+https://github.com/ArthurConmy/Automatic-Circuit-Discovery/tree/try-to-acdcpp-speedup
+
+of ACDC!!!
 """
 
 from IPython import get_ipython
@@ -258,7 +264,7 @@ exp = TLACDCExperiment(
     online_cache_cpu=False, # Trialling this being bigger...
     corrupted_cache_cpu=False,
     verbose=True,
-    add_sender_hooks=False,
+    add_sender_hooks=True,
     # positions = None if (model.cfg.model_name!="gpt2-xl" and not TESTING) else list(range(clean_toks.shape[-1])), 
 )
 print('Setting up graph')
@@ -285,6 +291,7 @@ for _ in range(N_TIMES):
         metric=factual_recall_metric,
         threshold=2*threshold,
         exp=exp,
+        verbose=True,
         attr_absolute_val=True,
     ) 
     t.cuda.empty_cache()
@@ -309,12 +316,10 @@ exp.setup_model_hooks(
     add_receiver_hooks=True,
     doing_acdc_runs=False,
 )
-# while "blocks.9" not in str(exp.current_node.name): # I used this while condition for profiling
+# TODO: why after here does the metric go all the way to the bad value?!
 
 used_layers = set()
-
 while exp.current_node:
-# if True: # Can we at least do one step?
     current_layer = exp.current_node.name.split(".")[1]
     if current_layer not in used_layers:
         show(exp.corr, fname=f'{current_layer}_thresh_{threshold}_in_acdc.png', show_full_index=False)
@@ -323,7 +328,7 @@ while exp.current_node:
     exp.step(testing=False)
 
 # # TODO We do not have Aaquib's changes yet so cannot run this
-print(f'ACDC Time: {time() - start_acdc_time}, with steps {exp.num_steps}')
+print(f'ACDC Time: {time() - start_acdc_time}, with steps {exp.num_passes}')
 
 # num_forward_passes_per_thresh[threshold] = exp.num_passes
 
