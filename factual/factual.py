@@ -259,7 +259,7 @@ exp = TLACDCExperiment(
     corrupted_cache_cpu=False,
     verbose=True,
     add_sender_hooks=False,
-    positions = None if (model.cfg.model_name!="gpt2-xl" and not TESTING) else list(range(clean_toks.shape[-1])), 
+    # positions = None if (model.cfg.model_name!="gpt2-xl" and not TESTING) else list(range(clean_toks.shape[-1])), 
 )
 print('Setting up graph')
 
