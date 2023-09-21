@@ -245,7 +245,7 @@ pruned_nodes_per_thresh = {}
 num_forward_passes_per_thresh = {}
 heads_per_thresh = {}
 os.makedirs(f'ims/{run_name}', exist_ok=True)
-threshold = 0.1
+threshold = 0.2
 start_thresh_time = time()
 
 # Set up experiment
@@ -289,11 +289,11 @@ for _ in range(N_TIMES):
         clean_input=clean_toks,
         corrupted_input=corr_toks,
         metric=factual_recall_metric,
-        threshold=2*threshold,
+        threshold=threshold,
         exp=exp,
         verbose=True,
         attr_absolute_val=True,
-    ) 
+    ) # TODO this seems to remove nodes from direct connections, but not otherwise?!
     t.cuda.empty_cache()
 acdcpp_time = time()
 print(f'ACDC++ time: {acdcpp_time - exp_time}')
@@ -313,10 +313,9 @@ start_acdc_time = time()
 exp.model.reset_hooks()
 exp.setup_model_hooks(
     add_sender_hooks=True,
-    add_receiver_hooks=True,
+    add_receiver_hooks=True, # Different from usual ACDC setup, but this is required because intermediate nodes will have mixes of corrupted and clean
     doing_acdc_runs=False,
 )
-# TODO: why after here does the metric go all the way to the bad value?!
 
 used_layers = set()
 while exp.current_node:
@@ -327,13 +326,12 @@ while exp.current_node:
 
     exp.step(testing=False)
 
-# # TODO We do not have Aaquib's changes yet so cannot run this
 print(f'ACDC Time: {time() - start_acdc_time}, with steps {exp.num_passes}')
 
 # num_forward_passes_per_thresh[threshold] = exp.num_passes
 
 heads_per_thresh[threshold].append(get_nodes(exp.corr))
-# # TODO add this back in 
+# TODO add this back in 
 show(exp.corr, fname=f'ims/{run_name}/thresh{threshold}_after_acdc.png')
 
 #%%
