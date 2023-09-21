@@ -185,3 +185,6 @@ fig.update_layout(
 
 fig.show()
 # %%
+
+data['TPR']
+# %%
