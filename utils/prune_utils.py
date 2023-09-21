@@ -104,7 +104,7 @@ def split_layers_and_heads(act: Tensor, model: HookedTransformer) -> Tensor:
 hook_filter = lambda name: name.endswith("ln1.hook_normalized") or name.endswith("attn.hook_result")
 head_input_filter = lambda name: name.endswith(("hook_q_input", "hook_k_input", "hook_v_input"))
 
-def get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=False, mode: Literal["node", "edge"]="node"):
+def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["node", "edge"]="node"):
     # cache the activations and gradients of the clean inputs
     model.reset_hooks()
     clean_cache = {}
@@ -120,12 +120,8 @@ def get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_met
         clean_grad_cache[hook.name] = act.detach()
 
     model.add_hook(hook_filter if mode=="node" else head_input_filter, backward_cache_hook, "bwd")
-
-    if pass_tokens_to_metric:
-        value = metric(model(clean_input), clean_input)
-    else:
-        value = metric(model(clean_input))
-
+    
+    value = metric(model(clean_input))
     value.backward()
 
     # cache the activations of the corrupted inputs
@@ -179,7 +175,6 @@ def acdc_nodes(model: HookedTransformer,
               metric: Callable[[Tensor], Tensor],
               threshold: float,
               exp: TLACDCExperiment,
-              pass_tokens_to_metric = False,
               verbose: bool = False,
               attr_absolute_val: bool = False) -> Tuple[
                   HookedTransformer, Bool[Tensor, 'n_layer n_heads']]:
@@ -197,7 +192,7 @@ def acdc_nodes(model: HookedTransformer,
         attr_absolute_val: whether to take the absolute value of the attribution before thresholding
     '''
     # get the 2 fwd and 1 bwd caches; cache "normalized" and "result" of attn layers
-    clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric, pass_tokens_to_metric=pass_tokens_to_metric)
+    clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric)
 
     # compute first-order Taylor approximation for each node to get the attribution
     clean_head_act = clean_cache.stack_head_results()
