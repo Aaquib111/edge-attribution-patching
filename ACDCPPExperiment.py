@@ -11,7 +11,7 @@ from typing import Callable, List, Literal
 from transformer_lens import HookedTransformer
 import torch as t
 from torch import Tensor
-
+import warnings
 from tqdm import tqdm
 
 class ACDCPPExperiment():
@@ -60,6 +60,9 @@ class ACDCPPExperiment():
         self.save_graphs_after = save_graphs_after
         self.pruning_mode: Literal["edge", "node"] = pruning_mode
         self.no_pruned_nodes_attr = no_pruned_nodes_attr
+
+        if self.pruning_mode == "edge" and self.no_pruned_nodes_attr != 1:
+            warnings.warn("I've been getting errors with no_pruned_nodes_attr > 1 with edge pruning, you may wish to switch to no_pruned_nodes_attr=1")
 
         self.acdc_args = acdc_kwargs
         if verbose:
