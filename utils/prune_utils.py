@@ -254,7 +254,7 @@ def acdc_nodes(model: HookedTransformer,
 
         results: Dict[Tuple[ModelComponent, ModelComponent], float] = {} # We use a list of floats as we may be splitting by position
         
-        for downstream_component in tqdm(downstream_components): # TODO ideally we should batch compute things in this loop
+        for downstream_component in tqdm(downstream_components, desc="Edge pruning"): # TODO ideally we should batch compute things in this loop
             for parent_node in exp.corr.graph[downstream_component.hook_point_name][downstream_component.index].parents:
                 upstream_component = ModelComponent(hook_point_name=parent_node.name, index=parent_node.index)
                 if "." in upstream_component.hook_point_name and "." in downstream_component.hook_point_name: # hook_embed and hook_pos_embed have no . but should always be connected anyway

@@ -28,6 +28,7 @@ else:
     sys.path.append('../Automatic-Circuit-Discovery/')
     sys.path.append('..')
 
+from ACDCPPExperiment import ACDCPPExperiment
 import json
 import warnings
 import re
@@ -252,94 +253,20 @@ start_thresh_time = time()
 # For GPT-J this takes >3 minutes if caches are on CPU. 30 seconds if not.
 # GPT-2 XL with positional splitting seems to take fairly long
 
-exp = TLACDCExperiment(
-    model=model,
-    threshold=threshold,
-    run_name=run_name, # TODO add this feature to main branch acdc
-    ds=clean_toks,
-    ref_ds=corr_toks,
-    metric=factual_recall_metric,
-    zero_ablation=False,
-    hook_verbose=False, 
-    online_cache_cpu=False, # Trialling this being bigger...
-    corrupted_cache_cpu=False,
-    verbose=True,
-    add_sender_hooks=True,
-    positions = None,
-    # positions = None if (model.cfg.model_name!="gpt2-xl" and not TESTING) else list(range(clean_toks.shape[-1])), 
+acdcpp_exp = ACDCPPExperiment(
+    model,
+    clean_toks,
+    corr_toks,
+    factual_recall_metric,
+    factual_recall_metric,
+    [threshold], # THRESHOLDS[:1],
+    run_name="my_factual_recall",
+    verbose=False,
+    attr_absolute_val=True,
+    save_graphs_after=0.07,
+    pruning_mode = "edge",
+    no_pruned_nodes_attr=1, 
 )
-print('Setting up graph')
-
-#%%
-
-# Set up computational graph
-exp.model.reset_hooks()
-exp.setup_model_hooks(
-    add_sender_hooks=True,
-    add_receiver_hooks=True,
-    doing_acdc_runs=False,
-)
-exp_time = time()
-print(f'Time to set up exp: {exp_time - start_thresh_time}')
-
-N_TIMES = 1 # Number of times such that this does not OOM GPT-J...
-
-for _ in range(N_TIMES):
-    pruned_nodes_attr = acdc_nodes(
-        model=exp.model,
-        clean_input=clean_toks,
-        corrupted_input=corr_toks,
-        metric=factual_recall_metric,
-        threshold=0.1*threshold,
-        exp=exp,
-        verbose=True,
-        attr_absolute_val=True,
-        mode="edge",
-    ) # TODO this seems to remove nodes from direct connections, but not otherwise?!
-    t.cuda.empty_cache()
-acdcpp_time = time()
-print(f'ACDC++ time: {acdcpp_time - exp_time}')
-gc.collect()
-t.cuda.empty_cache()
-
-heads_per_thresh[threshold] = [get_nodes(exp.corr)]
-pruned_nodes_per_thresh[threshold] = pruned_nodes_attr
-
-# # I think that this is too slow in general...
-# show(exp.corr, fname=f'ims/{run_name}/thresh{threshold}_before_acdc.png', show_full_index=False)
-    
-#%%
-
-start_acdc_time = time()
-# Set up computational graph again
-exp.model.reset_hooks()
-exp.setup_model_hooks(
-    add_sender_hooks=True,
-    add_receiver_hooks=True, # Different from usual ACDC setup, but this is required because intermediate nodes will have mixes of corrupted and clean
-    doing_acdc_runs=False,
-)
-
-used_layers = set()
-while exp.current_node:
-    current_layer = exp.current_node.name.split(".")[1]
-    if current_layer not in used_layers:
-        show(exp.corr, fname=f'{current_layer}_thresh_{threshold}_in_acdc.png', show_full_index=False)
-        used_layers.add(current_layer)
-
-    exp.step(testing=False)
-
-print(f'ACDC Time: {time() - start_acdc_time}, with steps {exp.num_passes}')
-
-# num_forward_passes_per_thresh[threshold] = exp.num_passes
-
-heads_per_thresh[threshold].append(get_nodes(exp.corr))
-# TODO add this back in 
-show(exp.corr, fname=f'ims/{run_name}/thresh{threshold}_after_acdc.png')
-
-#%%
-
-del exp
-gc.collect()
-t.cuda.empty_cache()
+pruned_heads, num_passes, pruned_attrs = acdcpp_exp.run()
 
 # %%
