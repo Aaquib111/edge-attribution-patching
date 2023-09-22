@@ -77,8 +77,8 @@ TESTING = True
 warnings.warn("Loading GPT-J takes some time. 5.75 minutes on a runpod A100. And why? On colab this takes 3 minutes, including the downloading part!")
 def load_model():
     model = HookedTransformer.from_pretrained_no_processing( # Maybe this can speedup things more?
-        "gpt2",
-        # "gpt2-xl",
+        # "gpt2",
+        "gpt2-xl",
         # "gpt-j-6b", # Can smaller models be used so there is less waiting?
         center_writing_weights=False,
         center_unembed=False,

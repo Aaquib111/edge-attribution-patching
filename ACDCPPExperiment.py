@@ -129,7 +129,7 @@ class ACDCPPExperiment():
         num_passes = {}
         pruned_attrs = {}
 
-        for threshold in tqdm(self.thresholds):
+        for threshold in tqdm(self.thresholds, desc="Running ACDC++ with different thresholds"):
             exp = self.setup_exp(threshold)
             acdcpp_heads, attrs = self.run_acdcpp(exp, threshold)
 
