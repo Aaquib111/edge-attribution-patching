@@ -247,7 +247,7 @@ def acdc_nodes(model: HookedTransformer,
                     remove_node(exp, node)
         return pruned_nodes_attr
     
-    elif mode=="edge":
+    elif mode == "edge":
         # Setup the upstream components
         upstream_components: List[ModelComponent] = [ModelComponent(hook_point_name=node.name, index=node.index) for node in exp.corr.nodes() if node.name.endswith(("_embed", "attn.hook_result", "mlp_out"))]
         downstream_components: List[ModelComponent] = [ModelComponent(hook_point_name=node.name, index=node.index) for node in exp.corr.nodes() if node.name.endswith(("k_input", "q_input", "v_input", "mlp_in", "resid_post"))]
@@ -267,7 +267,7 @@ def acdc_nodes(model: HookedTransformer,
                     # Other cases where upstream is actually after downstream!
                     continue
 
-            current_result = (clean_grad_cache[downstream_component.hook_point_name].cpu()[downstream_component.index.as_index] * (clean_cache[upstream_component.hook_point_name].cpu()[upstream_component.index.as_index] - corrupted_cache[upstream_component.hook_point_name].cpu()[upstream_component.index.as_index])).sum()
+            current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[upstream_component.hook_point_name][upstream_component.index.as_index] - corrupted_cache[upstream_component.hook_point_name][upstream_component.index.as_index])).sum()
             if attr_absolute_val: 
                 current_result = current_result.abs()
             results[upstream_component, downstream_component] = current_result.item()
