@@ -6,12 +6,12 @@ from acdc.TLACDCExperiment import TLACDCExperiment
 from utils.prune_utils import acdc_nodes, get_nodes
 from utils.graphics_utils import show
 
-from typing import Callable, List
+from typing import Callable, List, Literal
 
 from transformer_lens import HookedTransformer
 import torch as t
 from torch import Tensor
-
+import warnings
 from tqdm import tqdm
 
 class ACDCPPExperiment():
@@ -33,6 +33,8 @@ class ACDCPPExperiment():
         return_pruned_attr: bool = True,
         return_num_passes: bool = True,
         pass_tokens_to_metric: bool = False,
+        pruning_mode: Literal["edge", "node"] = "node",
+        no_pruned_nodes_attr: int = 10,
         **acdc_kwargs
     ):
         self.model = model
@@ -56,6 +58,11 @@ class ACDCPPExperiment():
         self.return_pruned_attr = return_pruned_attr
         self.return_num_passes = return_num_passes
         self.save_graphs_after = save_graphs_after
+        self.pruning_mode: Literal["edge", "node"] = pruning_mode
+        self.no_pruned_nodes_attr = no_pruned_nodes_attr
+
+        if self.pruning_mode == "edge" and self.no_pruned_nodes_attr != 1:
+            warnings.warn("I've been getting errors with no_pruned_nodes_attr > 1 with edge pruning, you may wish to switch to no_pruned_nodes_attr=1")
 
         self.acdc_args = acdc_kwargs
         if verbose:
@@ -89,7 +96,7 @@ class ACDCPPExperiment():
         if self.verbose:
             print('Running ACDC++')
             
-        for _ in range(10):
+        for _ in range(self.no_pruned_nodes_attr):
             pruned_nodes_attr = acdc_nodes(
                 model=exp.model,
                 clean_input=self.clean_data,
@@ -99,6 +106,7 @@ class ACDCPPExperiment():
                 exp=exp,
                 verbose=self.verbose,
                 attr_absolute_val=self.attr_absolute_val,
+                mode=self.pruning_mode,
             )
             t.cuda.empty_cache()
         return (get_nodes(exp.corr), pruned_nodes_attr)
