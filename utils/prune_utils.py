@@ -267,7 +267,7 @@ def acdc_nodes(model: HookedTransformer,
                     # Other cases where upstream is actually after downstream!
                     continue
 
-            current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[upstream_component.hook_point_name][upstream_component.index.as_index] - corrupted_cache[upstream_component.hook_point_name][upstream_component.index.as_index])).sum()
+            current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[upstream_component.hook_point_name][upstream_component.index.as_index] - corrupted_cache[upstream_component.hook_point_name][upstream_component.index.as_index])).sum().cpu()
             if attr_absolute_val: 
                 current_result = current_result.abs()
             results[upstream_component, downstream_component] = current_result.item()
