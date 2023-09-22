@@ -268,7 +268,7 @@ acdcpp_exp = ACDCPPExperiment(
     pruning_mode = "edge",
     no_pruned_nodes_attr=1, 
     positions = list(range(clean_toks.shape[1])),
-)
+) # Even setting up all the connections is 8 mins! TODO find out why the progress bar fot this is hidden...
 pruned_heads, num_passes, pruned_attrs = acdcpp_exp.run()
 
 # %%
