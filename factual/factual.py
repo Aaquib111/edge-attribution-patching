@@ -262,10 +262,12 @@ acdcpp_exp = ACDCPPExperiment(
     [threshold], # THRESHOLDS[:1],
     run_name="my_factual_recall",
     verbose=False,
+    acdc_verbose=True,
     attr_absolute_val=True,
     save_graphs_after=0.07,
     pruning_mode = "edge",
     no_pruned_nodes_attr=1, 
+    positions = list(range(clean_toks.shape[1])),
 )
 pruned_heads, num_passes, pruned_attrs = acdcpp_exp.run()
 

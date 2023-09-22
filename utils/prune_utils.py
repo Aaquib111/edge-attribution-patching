@@ -127,7 +127,6 @@ def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["nod
     model.add_hook(hook_filter if mode=="node" else edge_acdcpp_incoming_filter, backward_cache_hook, "bwd")
     value = metric(model(clean_input))
 
-
     value.backward()
 
     # cache the activations of the corrupted inputs
@@ -266,7 +265,10 @@ def acdc_nodes(model: HookedTransformer,
                         # Other cases where upstream is actually after downstream!
                         continue
 
+                # try:
                 current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[upstream_component.hook_point_name][upstream_component.index.as_index] - corrupted_cache[upstream_component.hook_point_name][upstream_component.index.as_index])).sum().cpu()
+                # except Exception as e:
+                #     print(f'Got an error {e} when computing {downstream_component=} {upstream_component=}')
 
                 if attr_absolute_val: 
                     current_result = current_result.abs()

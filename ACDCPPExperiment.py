@@ -27,6 +27,7 @@ class ACDCPPExperiment():
         run_name: str,
         save_graphs_after: float,
         verbose: bool = False,
+        acdc_verbose: bool = False,
         attr_absolute_val: bool = True,
         zero_ablation: bool = False,
         return_pruned_heads: bool = True,
@@ -44,6 +45,7 @@ class ACDCPPExperiment():
 
         self.run_name = run_name
         self.verbose = verbose
+        self.acdc_verbose = acdc_verbose
         
         self.acdc_metric = acdc_metric
         self.acdcpp_metric = acdcpp_metric
@@ -80,7 +82,7 @@ class ACDCPPExperiment():
             # save_graphs_after=self.save_graphs_after,
             online_cache_cpu=False,
             corrupted_cache_cpu=False,
-            verbose=self.verbose,
+            verbose=self.acdc_verbose,
             **self.acdc_args
         )
         exp.model.reset_hooks()
