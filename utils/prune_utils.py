@@ -252,35 +252,39 @@ def acdc_nodes(model: HookedTransformer,
         upstream_components: List[ModelComponent] = [ModelComponent(hook_point_name=node.name, index=node.index) for node in exp.corr.nodes() if node.name.endswith(("_embed", "attn.hook_result", "mlp_out"))]
         downstream_components: List[ModelComponent] = [ModelComponent(hook_point_name=node.name, index=node.index) for node in exp.corr.nodes() if node.name.endswith(("k_input", "q_input", "v_input", "mlp_in", "resid_post"))]
 
-        results: Dict[Tuple[ModelComponent, ModelComponent], float] = {}
+        results: Dict[Tuple[ModelComponent, ModelComponent], float] = {} # We use a list of floats as we may be splitting by position
         
-        for upstream_component, downstream_component in tqdm(list(itertools.product(
-            upstream_components,
-            downstream_components,
-        ))): # TODO ideally we should batch compute things in this loop
-            if "." in upstream_component.hook_point_name and "." in downstream_component.hook_point_name: # hook_embed and hook_pos_embed have no . but should always be connected anyway
-                upstream_layer = int(upstream_component.hook_point_name.split(".")[1])
-                downstream_layer = int(downstream_component.hook_point_name.split(".")[1])
-                if upstream_layer > downstream_layer:
-                    continue
-                if upstream_layer == downstream_layer and (upstream_component.hook_point_name.endswith("mlp_out") or downstream_component.hook_point_name.endswith(("q_input", "k_input", "v_input"))):
-                    # Other cases where upstream is actually after downstream!
-                    continue
+        for downstream_component in tqdm(downstream_components): # TODO ideally we should batch compute things in this loop
+            for parent_node in exp.corr.graph[downstream_component.hook_point_name][downstream_component.index].parents:
+                upstream_component = ModelComponent(hook_point_name=parent_node.name, index=parent_node.index)
+                if "." in upstream_component.hook_point_name and "." in downstream_component.hook_point_name: # hook_embed and hook_pos_embed have no . but should always be connected anyway
+                    upstream_layer = int(upstream_component.hook_point_name.split(".")[1])
+                    downstream_layer = int(downstream_component.hook_point_name.split(".")[1])
+                    if upstream_layer > downstream_layer:
+                        continue
+                    if upstream_layer == downstream_layer and (upstream_component.hook_point_name.endswith("mlp_out") or downstream_component.hook_point_name.endswith(("q_input", "k_input", "v_input"))):
+                        # Other cases where upstream is actually after downstream!
+                        continue
 
-            current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[upstream_component.hook_point_name][upstream_component.index.as_index] - corrupted_cache[upstream_component.hook_point_name][upstream_component.index.as_index])).sum()
-            if attr_absolute_val: 
-                current_result = current_result.abs()
-            results[upstream_component, downstream_component] = current_result.item()
-            should_prune = current_result < threshold
+                current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[upstream_component.hook_point_name][upstream_component.index.as_index] - corrupted_cache[upstream_component.hook_point_name][upstream_component.index.as_index])).sum().cpu()
 
-            if should_prune:
-                edge_tuple = (downstream_component.hook_point_name, downstream_component.index, upstream_component.hook_point_name, upstream_component.index)
-                exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
-                exp.corr.remove_edge(*edge_tuple)
+                if attr_absolute_val: 
+                    current_result = current_result.abs()
+                results[upstream_component, downstream_component] = current_result.item()
 
-            else:
-                if verbose: # Putting this here since tons of things get pruned when doing edges!
-                    print(f'NOT PRUNING {upstream_component=} {downstream_component=} with attribution {current_result}')
+                for position in exp.positions:
+                    should_prune = current_result < threshold
+                    if should_prune:
+                        try:
+                            edge_tuple = (downstream_component.hook_point_name, downstream_component.index, upstream_component.hook_point_name, upstream_component.index)
+                            exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
+                            exp.corr.remove_edge(*edge_tuple)
+                        except:
+                            pass # TODO remove
+
+                    else:
+                        if verbose: # Putting this here since tons of things get pruned when doing edges!
+                            print(f'NOT PRUNING {upstream_component=} {downstream_component=} with attribution {current_result}')
 
         return results
     
