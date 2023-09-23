@@ -130,7 +130,6 @@ class ACDCPPExperiment():
         for threshold in tqdm(self.thresholds):
             exp = self.setup_exp(threshold)
             acdcpp_heads, attrs = self.run_acdcpp(exp, threshold)
-
             # Only applying threshold to this one as these graphs tend to be HUGE
             if threshold >= self.save_graphs_after:
                 print('Saving ACDC++ Graph')

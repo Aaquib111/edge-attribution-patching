@@ -201,7 +201,6 @@ def acdc_nodes(model: HookedTransformer,
     '''
     # get the 2 fwd and 1 bwd caches; cache "normalized" and "result" of attn layers
     clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric, mode=mode)
-
     if mode == "node":
         # compute first-order Taylor approximation for each node to get the attribution
         clean_head_act = clean_cache.stack_head_results()
@@ -271,7 +270,7 @@ def acdc_nodes(model: HookedTransformer,
             if attr_absolute_val: 
                 current_result = current_result.abs()
             results[upstream_component, downstream_component] = current_result.item()
-            should_prune = current_result < threshold
+            should_prune = float(current_result) < float(threshold)
 
             if should_prune:
                 edge_tuple = (downstream_component.hook_point_name, downstream_component.index, upstream_component.hook_point_name, upstream_component.index)
