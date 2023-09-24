@@ -16,16 +16,16 @@ import re
 import numpy as np
 
 #%%
-
-# Set your root directory here
-ROOT_DIR = Path("/Users/canrager/acdcpp/greaterthan_task")
-assert ROOT_DIR.exists(), f"I don't think your ROOT_DIR is correct (ROOT_DIR = {ROOT_DIR})"
-
-# %%
-
 TASK = "greaterthan"
 METRIC = "greaterthan"
-FNAME = f"results/greaterthan_absval_pruned_heads.json"
+
+# Set your root directory here
+ROOT_DIR = Path("/Users/canrager/acdcpp")
+assert ROOT_DIR.exists(), f"I don't think your ROOT_DIR is correct (ROOT_DIR = {ROOT_DIR})"
+
+# %% ACDCPP
+########################################
+FNAME = f"greaterthan_task/results/greaterthan_absval_pruned_heads.json"
 FPATH = ROOT_DIR / FNAME
 assert FPATH.exists(), f"I don't think your FNAME is correct (FPATH = {FPATH})"
 
@@ -33,7 +33,7 @@ assert FPATH.exists(), f"I don't think your FNAME is correct (FPATH = {FPATH})"
 
 with open(FPATH, 'r') as f:
     pruned_heads = json.load(f)
-with open(ROOT_DIR /'results/greaterthan_absval_num_passes.json', 'r') as f:
+with open(ROOT_DIR /'greaterthan_task/results/greaterthan_absval_num_passes.json', 'r') as f:
     num_passes = json.load(f)
 
 # %%
@@ -123,7 +123,29 @@ df = pd.DataFrame(data)
 row = [np.inf, 0, 1, 0, 1, 0, 1, 0, 1, 0]
 df.loc[len(df)] = row
 
+# %% ACDC
+#######################################################
 # %%
+
+FNAME = f"Automatic-Circuit-Discovery/experiments/results/plots_data/acdc-{TASK}-{METRIC}-False-0.json"
+FPATH = ROOT_DIR / FNAME
+assert FPATH.exists(), f"I don't think your FNAME is correct (FPATH = {FPATH})"
+
+# %%
+
+acdc_data = json.load(open(FPATH, "r")) 
+
+# %%
+
+relevant_data = acdc_data["trained"]["random_ablation"][f"{TASK}"][f"{METRIC}"]["ACDC"]
+
+# %%
+
+node_tpr = relevant_data["node_tpr"]
+node_fpr = relevant_data["node_fpr"]
+
+# %%
+
 
 # We would just plot these, but sometimes points are not on the Pareto frontier
 
@@ -141,8 +163,8 @@ def pareto_optimal_sublist(xs, ys):
 
 # %%
 
-pareto_node_tpr, pareto_node_fpr = pareto_optimal_sublist(data['TPR'], data['FPR'])
-
+acdcpp_pareto_node_tpr, acdcpp_pareto_node_fpr = pareto_optimal_sublist(data['TPR'], data['FPR'])
+acdc_pareto_node_tpr, acdc_pareto_node_fpr = pareto_optimal_sublist(node_tpr, node_fpr)
 # %%
 
 # Thanks GPT-4 for this code
@@ -151,12 +173,15 @@ pareto_node_tpr, pareto_node_fpr = pareto_optimal_sublist(data['TPR'], data['FPR
 plt.figure()
 
 # Plot the ROC curve
-plt.step(pareto_node_fpr, pareto_node_tpr, where='post')
+plt.step(acdc_pareto_node_fpr, acdc_pareto_node_tpr, where='post', label="ACDCpp + ACDC")
+plt.step(acdcpp_pareto_node_fpr, acdcpp_pareto_node_tpr, where='post', label="ACDC only")
 
 # Add titles and labels
 plt.title("ROC Curve of number of Nodes recovered by ACDC")
 plt.xlabel("False Positive Rate")
 plt.ylabel("True Positive Rate")
+
+plt.legend(loc="lower right")
 
 # Show the plot
 plt.show()
@@ -165,26 +190,26 @@ plt.show()
 
 # Original code from https://plotly.com/python/line-and-scatter/
 
-# I use plotly but it should be easy to adjust to matplotlib
-fig = go.Figure()
-fig.add_trace(
-    go.Scatter(
-        x=list(pareto_node_fpr),
-        y=list(pareto_node_tpr),
-        mode="lines",
-        line=dict(shape="hv"),
-        showlegend=False,
-    ),
-)
+# # I use plotly but it should be easy to adjust to matplotlib
+# fig = go.Figure()
+# fig.add_trace(
+#     go.Scatter(
+#         x=list(pareto_node_fpr),
+#         y=list(pareto_node_tpr),
+#         mode="lines",
+#         line=dict(shape="hv"),
+#         showlegend=False,
+#     ),
+# )
 
-fig.update_layout(
-    title="ROC Curve of number of Nodes recovered by ACDC",
-    xaxis_title="False Positive Rate",
-    yaxis_title="True Positive Rate",
-)
+# fig.update_layout(
+#     title="ROC Curve of number of Nodes recovered by ACDC",
+#     xaxis_title="False Positive Rate",
+#     yaxis_title="True Positive Rate",
+# )
 
-fig.show()
-# %%
+# fig.show()
+# # %%
 
-data['TPR']
+# data['TPR']
 # %%
