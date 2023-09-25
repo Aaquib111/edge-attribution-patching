@@ -1,3 +1,4 @@
+#%%
 import sys
 sys.path.append('Automatic-Circuit-Discovery/')
 from tqdm import tqdm
@@ -16,7 +17,7 @@ from typing import Callable, Tuple, Literal, Dict, Optional, List, Union, Set
 from utils.graphics_utils import get_node_name
 from typing import NamedTuple
 
-ModelComponent = NamedTuple("ModelComponent", [("hook_point_name", str), ("index", TorchIndex)]) # Abstraction for a node in the computational graph. TODO: move this into ACDC repo when standardised
+ModelComponent = NamedTuple("ModelComponent", [("hook_point_name", str), ("index", TorchIndex), ("incoming_edge_type", str)]) # Abstraction for a node in the computational graph. TODO: move this into ACDC repo when standardised. TODO make incoming_edge_type an enum that's hashable
 
 def remove_redundant_node(exp, node, safe=True, allow_fails=True):
         if safe:
@@ -112,7 +113,7 @@ def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["nod
     def forward_cache_hook(act, hook):
         clean_cache[hook.name] = act.detach()
 
-    edge_acdcpp_outgoing_filter = lambda name: name.endswith(("hook_result", "hook_mlp_out", "blocks.0.hook_resid_pre"))
+    edge_acdcpp_outgoing_filter = lambda name: name.endswith(("hook_result", "hook_mlp_out", "blocks.0.hook_resid_pre", "hook_q", "hook_k", "hook_v"))
     model.add_hook(hook_filter if mode == "node" else edge_acdcpp_outgoing_filter, forward_cache_hook, "fwd")
 
     clean_grad_cache = {}
@@ -123,8 +124,8 @@ def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["nod
     incoming_ends = ["hook_q_input", "hook_k_input", "hook_v_input", f"blocks.{model.cfg.n_layers-1}.hook_resid_post"]
     if not model.cfg.attn_only:
         incoming_ends.append("hook_mlp_in")
-    edge_acdcpp_incoming_filter = lambda name: name.endswith(tuple(incoming_ends))
-    model.add_hook(hook_filter if mode=="node" else edge_acdcpp_incoming_filter, backward_cache_hook, "bwd")
+    edge_acdcpp_back_filter = lambda name: name.endswith(tuple(incoming_ends + ["hook_q", "hook_k", "hook_v"]))
+    model.add_hook(hook_filter if mode=="node" else edge_acdcpp_back_filter, backward_cache_hook, "bwd")
     value = metric(model(clean_input))
 
 
@@ -245,40 +246,44 @@ def acdc_nodes(model: HookedTransformer,
                     remove_node(exp, node)
         return pruned_nodes_attr
     
-    elif mode=="edge":
+    elif mode == "edge":
         # Setup the upstream components
-        upstream_components: List[ModelComponent] = [ModelComponent(hook_point_name=node.name, index=node.index) for node in exp.corr.nodes() if node.name.endswith(("_embed", "attn.hook_result", "mlp_out"))]
-        downstream_components: List[ModelComponent] = [ModelComponent(hook_point_name=node.name, index=node.index) for node in exp.corr.nodes() if node.name.endswith(("k_input", "q_input", "v_input", "mlp_in", "resid_post"))]
+        relevant_nodes: List = [node for node in exp.corr.nodes() if node.incoming_edge_type in [EdgeType.ADDITION, EdgeType.DIRECT_COMPUTATION]]
 
-        results: Dict[Tuple[ModelComponent, ModelComponent], float] = {}
+        results: Dict[Tuple[ModelComponent, ModelComponent], float] = {} # We use a list of floats as we may be splitting by position
         
-        for upstream_component, downstream_component in tqdm(list(itertools.product(
-            upstream_components,
-            downstream_components,
-        ))): # TODO ideally we should batch compute things in this loop
-            if "." in upstream_component.hook_point_name and "." in downstream_component.hook_point_name: # hook_embed and hook_pos_embed have no . but should always be connected anyway
-                upstream_layer = int(upstream_component.hook_point_name.split(".")[1])
-                downstream_layer = int(downstream_component.hook_point_name.split(".")[1])
-                if upstream_layer > downstream_layer:
-                    continue
-                if upstream_layer == downstream_layer and (upstream_component.hook_point_name.endswith("mlp_out") or downstream_component.hook_point_name.endswith(("q_input", "k_input", "v_input"))):
-                    # Other cases where upstream is actually after downstream!
-                    continue
+        for relevant_node in tqdm(relevant_nodes, desc="Edge pruning"): # TODO ideally we should batch compute things in this loop
+            parents = set([ModelComponent(hook_point_name=node.name, index=node.index, incoming_edge_type=str(node.incoming_edge_type)) for node in relevant_node.parents])
+            downstream_component = ModelComponent(hook_point_name=relevant_node.name, index=relevant_node.index, incoming_edge_type=str(relevant_node.incoming_edge_type))
+            for parent in parents:
+                if "." in parent.hook_point_name and "." in downstream_component.hook_point_name: # hook_embed and hook_pos_embed have no . but should always be connected anyway
+                    upstream_layer = int(parent.hook_point_name.split(".")[1])
+                    downstream_layer = int(downstream_component.hook_point_name.split(".")[1])
+                    if upstream_layer > downstream_layer:
+                        continue
+                    if upstream_layer == downstream_layer and (parent.hook_point_name.endswith("mlp_out") or downstream_component.hook_point_name.endswith(("q_input", "k_input", "v_input"))):
+                        # Other cases where upstream is actually after downstream!
+                        continue
 
-            current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[upstream_component.hook_point_name][upstream_component.index.as_index] - corrupted_cache[upstream_component.hook_point_name][upstream_component.index.as_index])).sum().cpu()
-            if attr_absolute_val: 
-                current_result = current_result.abs()
-            results[upstream_component, downstream_component] = current_result.item()
-            should_prune = float(current_result) < float(threshold)
+                print(f'Pruning {parent=} {downstream_component=}')
+                fwd_cache_hook_name = parent.hook_point_name if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.hook_point_name
+                fwd_cache_index = parent.index if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.index
+                current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[fwd_cache_hook_name][fwd_cache_index.as_index] - corrupted_cache[fwd_cache_hook_name][fwd_cache_index.as_index])).sum().cpu()
 
-            if should_prune:
-                edge_tuple = (downstream_component.hook_point_name, downstream_component.index, upstream_component.hook_point_name, upstream_component.index)
-                exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
-                exp.corr.remove_edge(*edge_tuple)
+                if attr_absolute_val: 
+                    current_result = current_result.abs()
+                results[parent, downstream_component] = current_result.item()
 
-            else:
-                if verbose: # Putting this here since tons of things get pruned when doing edges!
-                    print(f'NOT PRUNING {upstream_component=} {downstream_component=} with attribution {current_result}')
+                # for position in exp.positions: # TODO add this back in!
+                should_prune = current_result < threshold
+                if should_prune:
+                    edge_tuple = (downstream_component.hook_point_name, downstream_component.index, parent.hook_point_name, parent.index)
+                    exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
+                    exp.corr.remove_edge(*edge_tuple)
+
+                else:
+                    if verbose: # Putting this here since tons of things get pruned when doing edges!
+                        print(f'NOT PRUNING {parent=} {downstream_component=} with attribution {current_result}')
 
         return results
     
