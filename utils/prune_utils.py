@@ -180,8 +180,8 @@ def acdc_nodes(model: HookedTransformer,
     clean_input: Tensor,
     corrupted_input: Tensor,
     metric: Callable[[Tensor], Tensor],
-    threshold: float,
     exp: TLACDCExperiment,
+    threshold: float = None, # No threshold necessary for edge based pruning, it is later applied in ACDCPPExperiment.eval_acdcpp()
     verbose: bool = False,
     attr_absolute_val: bool = False,
     mode: Literal["node", "edge"]="node",
@@ -201,7 +201,7 @@ def acdc_nodes(model: HookedTransformer,
     '''
     # get the 2 fwd and 1 bwd caches; cache "normalized" and "result" of attn layers
     clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric, mode=mode)
-    if mode == "node":
+    if mode == "node": #TODO adapt node based acdcpp to run without threshold, externalize pruning to ACDCPPExperiment.eval_acdcpp()
         # compute first-order Taylor approximation for each node to get the attribution
         clean_head_act = clean_cache.stack_head_results()
         corr_head_act = corrupted_cache.stack_head_results()
@@ -269,21 +269,8 @@ def acdc_nodes(model: HookedTransformer,
                 fwd_cache_hook_name = parent.hook_point_name if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.hook_point_name
                 fwd_cache_index = parent.index if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.index
                 current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[fwd_cache_hook_name][fwd_cache_index.as_index] - corrupted_cache[fwd_cache_hook_name][fwd_cache_index.as_index])).sum()
-
-                if attr_absolute_val: 
-                    current_result = current_result.abs()
                 results[parent, downstream_component] = current_result.item()
 
-                # for position in exp.positions: # TODO add this back in!
-                should_prune = current_result < threshold
-                if should_prune:
-                    edge_tuple = (downstream_component.hook_point_name, downstream_component.index, parent.hook_point_name, parent.index)
-                    exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
-                    exp.corr.remove_edge(*edge_tuple)
-
-                else:
-                    if verbose: # Putting this here since tons of things get pruned when doing edges!
-                        print(f'NOT PRUNING {parent=} {downstream_component=} with attribution {current_result}')
             t.cuda.empty_cache()
         return results
     

@@ -3,16 +3,17 @@ import sys
 sys.path.append('Automatic-Circuit-Discovery/')
 
 from acdc.TLACDCExperiment import TLACDCExperiment
-from utils.prune_utils import acdc_nodes, get_nodes
+from utils.prune_utils import acdc_nodes, get_nodes, ModelComponent
 from utils.graphics_utils import show
 
-from typing import Callable, List, Literal
+from typing import Callable, List, Literal, Dict, Tuple
 
 from transformer_lens import HookedTransformer
 import torch as t
 from torch import Tensor
 import warnings
 from tqdm import tqdm
+import numpy as np
 
 class ACDCPPExperiment():
 
@@ -92,24 +93,49 @@ class ACDCPPExperiment():
 
         return exp
     
-    def run_acdcpp(self, exp: TLACDCExperiment, threshold: float):
+    def run_acdcpp(self, exp: TLACDCExperiment):
+        """
+        Initial run of ACDCpp to calculate all attribution scores once before sweeping through thresholds
+        """
         if self.verbose:
             print('Running ACDC++')
             
         for _ in range(self.no_pruned_nodes_attr):
-            pruned_nodes_attr = acdc_nodes(
+            acdcpp_attrs = acdc_nodes(
                 model=exp.model,
                 clean_input=self.clean_data,
                 corrupted_input=self.corr_data,
                 metric=self.acdcpp_metric, 
-                threshold=threshold,
                 exp=exp,
                 verbose=self.verbose,
                 attr_absolute_val=self.attr_absolute_val,
                 mode=self.pruning_mode,
             )
             t.cuda.empty_cache()
-        return (get_nodes(exp.corr), pruned_nodes_attr)
+        return acdcpp_attrs
+        
+    
+    def eval_acdcpp(self, exp, acdcpp_results, threshold):
+        """
+        Applying threshold to precalculated results from run_acdcpp()
+        """
+
+        for (parent, downstream_component), attr in acdcpp_results.items():
+            if self.attr_absolute_val: 
+                attr = np.abs(attr)
+
+            # for position in exp.positions: # TODO add this back in!
+            should_prune = attr < threshold
+            if should_prune:
+                edge_tuple = (downstream_component.hook_point_name, downstream_component.index, parent.hook_point_name, parent.index)
+                exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
+                exp.corr.remove_edge(*edge_tuple)
+
+            else:
+                if self.verbose: # Putting this here since tons of things get pruned when doing edges!
+                    print(f'NOT PRUNING {parent=} {downstream_component=} with attribution {attr}')
+
+        return get_nodes(exp.corr)
 
     def run_acdc(self, exp: TLACDCExperiment):
         if self.verbose:
@@ -125,11 +151,13 @@ class ACDCPPExperiment():
 
         pruned_heads = {}
         num_passes = {}
-        pruned_attrs = {}
+        
+        exp = self.setup_exp(threshold=0) # Have to setup exp.corr.nodes for initial ACDCpp run; TODO rewrite run_acdpp run_acdcpp so it does not req an exp object explicitly
+        acdcpp_attrs = self.run_acdcpp(exp)
 
         for threshold in tqdm(self.thresholds):
             exp = self.setup_exp(threshold)
-            acdcpp_heads, attrs = self.run_acdcpp(exp, threshold)
+            acdcpp_heads = self.eval_acdcpp(exp, acdcpp_attrs, threshold)
             # Only applying threshold to this one as these graphs tend to be HUGE
             if threshold >= self.save_graphs_after:
                 print('Saving ACDC++ Graph')
@@ -142,8 +170,7 @@ class ACDCPPExperiment():
                 
             pruned_heads[threshold] = [acdcpp_heads, acdc_heads]
             num_passes[threshold] = passes
-            pruned_attrs[threshold] = attrs
             del exp
             t.cuda.empty_cache()
         t.cuda.empty_cache()
-        return pruned_heads, num_passes, pruned_attrs
+        return pruned_heads, num_passes, acdcpp_attrs # Returning acdcpp attrs directly as they stay the same
