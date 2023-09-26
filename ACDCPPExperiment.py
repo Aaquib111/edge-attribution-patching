@@ -130,6 +130,8 @@ class ACDCPPExperiment():
                 edge_tuple = (downstream_component.hook_point_name, downstream_component.index, parent.hook_point_name, parent.index)
                 exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
                 exp.corr.remove_edge(*edge_tuple)
+                 if self.verbose:
+                    print(f'Pruning {parent=} {downstream_component=}')
 
             else:
                 if self.verbose: # Putting this here since tons of things get pruned when doing edges!
