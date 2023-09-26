@@ -268,7 +268,7 @@ def acdc_nodes(model: HookedTransformer,
                 print(f'Pruning {parent=} {downstream_component=}')
                 fwd_cache_hook_name = parent.hook_point_name if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.hook_point_name
                 fwd_cache_index = parent.index if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.index
-                current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[fwd_cache_hook_name][fwd_cache_index.as_index] - corrupted_cache[fwd_cache_hook_name][fwd_cache_index.as_index])).sum().cpu()
+                current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[fwd_cache_hook_name][fwd_cache_index.as_index] - corrupted_cache[fwd_cache_hook_name][fwd_cache_index.as_index])).sum()
 
                 if attr_absolute_val: 
                     current_result = current_result.abs()
@@ -284,7 +284,7 @@ def acdc_nodes(model: HookedTransformer,
                 else:
                     if verbose: # Putting this here since tons of things get pruned when doing edges!
                         print(f'NOT PRUNING {parent=} {downstream_component=} with attribution {current_result}')
-
+            t.cuda.empty_cache()
         return results
     
     else:
