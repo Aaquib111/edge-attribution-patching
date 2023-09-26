@@ -144,6 +144,16 @@ relevant_data = acdc_data["trained"]["random_ablation"][f"{TASK}"][f"{METRIC}"][
 node_tpr = relevant_data["node_tpr"]
 node_fpr = relevant_data["node_fpr"]
 
+#%%
+print(relevant_data.keys())
+print(relevant_data["node_precision"])
+
+
+
+
+
+
+
 # %%
 
 
