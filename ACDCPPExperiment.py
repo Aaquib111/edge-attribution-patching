@@ -151,7 +151,7 @@ class ACDCPPExperiment():
 
         return (get_nodes(exp.corr), exp.num_passes)
 
-    def save(self, acdcpp_threshold, pruned_heads, num_passes):
+    def save_acdc(self, acdcpp_threshold, pruned_heads, num_passes):
         for thresh in pruned_heads.keys():
             pruned_heads[thresh][0] = list(pruned_heads[thresh][0])
             pruned_heads[thresh][1] = list(pruned_heads[thresh][1])
@@ -160,6 +160,18 @@ class ACDCPPExperiment():
             json.dump(pruned_heads, f)
         with open(f'{self.run_name}_acdcpp{acdcpp_threshold}_num_passes_docstring.json', 'w') as f:
             json.dump(num_passes, f)
+    
+    def save_acdcpp(self, acdcpp_attr):
+        # # Save results
+        def convert_to_torch_index(index_list):
+            return ''.join(['None' if i == ':' else i for i in index_list])
+
+        cleaned_attrs = []
+        for ((e1, i1, _), (e2, i2, _)), attr in acdcpp_attr.items():
+            cleaned_attrs.append([e1, convert_to_torch_index(str(i1)), e2, convert_to_torch_index(str(i2)), attr])
+                
+        with open(f'{self.run_name}_acdcpp_only_attrs.json', 'w') as f:
+            json.dump(cleaned_attrs, f)
 
     def run(self, save_after_acdcpp=True, save_after_acdc=True):
         os.makedirs(f'ims/{self.run_name}', exist_ok=True)
@@ -169,6 +181,7 @@ class ACDCPPExperiment():
         
         exp = self.setup_exp(threshold=-1) # Have to setup exp.corr.nodes for initial ACDCpp run; TODO rewrite run_acdpp run_acdcpp so it does not req an exp object explicitly
         acdcpp_attrs = self.run_acdcpp(exp)
+        self.save_acdcpp(acdcpp_attrs)
 
         for acdcpp_threshold in tqdm(self.acdcpp_thresholds, desc="ACDC++"):
             # if self.verbose:
@@ -194,7 +207,7 @@ class ACDCPPExperiment():
                 del prepruned_exp
 
                 t.cuda.empty_cache()
-                self.save(acdcpp_threshold, pruned_heads, num_passes)
+                self.save_acdc(acdcpp_threshold, pruned_heads, num_passes)
             t.cuda.empty_cache()
         t.cuda.empty_cache()
         
