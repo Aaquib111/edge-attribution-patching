@@ -14,6 +14,7 @@ from torch import Tensor
 import warnings
 from tqdm import tqdm
 import numpy as np
+import json
 
 class ACDCPPExperiment():
 
@@ -24,7 +25,8 @@ class ACDCPPExperiment():
         corr_data: Tensor,
         acdc_metric: Callable[[Tensor], Tensor],
         acdcpp_metric: Callable[[Tensor], Tensor],
-        thresholds: List[float],
+        acdc_thresholds: List[float],
+        acdcpp_thresholds: List[float],
         run_name: str,
         save_graphs_after: float,
         verbose: bool = False,
@@ -50,7 +52,8 @@ class ACDCPPExperiment():
         self.acdcpp_metric = acdcpp_metric
         self.pass_tokens_to_metric = pass_tokens_to_metric
 
-        self.thresholds = thresholds 
+        self.acdc_thresholds = acdc_thresholds 
+        self.acdcpp_thresholds = acdcpp_thresholds 
         self.attr_absolute_val = attr_absolute_val
         self.zero_ablation = zero_ablation
 
@@ -130,14 +133,14 @@ class ACDCPPExperiment():
                 edge_tuple = (downstream_component.hook_point_name, downstream_component.index, parent.hook_point_name, parent.index)
                 exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
                 exp.corr.remove_edge(*edge_tuple)
-            if self.verbose:
-                print(f'Pruning {parent=} {downstream_component=}')
+                if self.verbose:
+                    print(f'Pruning {parent=} {downstream_component=}')
 
             else:
                 if self.verbose: # Putting this here since tons of things get pruned when doing edges!
                     print(f'NOT PRUNING {parent=} {downstream_component=} with attribution {attr}')
 
-        return get_nodes(exp.corr)
+        return exp, get_nodes(exp.corr)
 
     def run_acdc(self, exp: TLACDCExperiment):
         if self.verbose:
@@ -148,31 +151,51 @@ class ACDCPPExperiment():
 
         return (get_nodes(exp.corr), exp.num_passes)
 
+    def save(self, acdcpp_threshold, pruned_heads, num_passes):
+        for thresh in pruned_heads.keys():
+            pruned_heads[thresh][0] = list(pruned_heads[thresh][0])
+            pruned_heads[thresh][1] = list(pruned_heads[thresh][1])
+                
+        with open(f'{self.run_name}_acdcpp{acdcpp_threshold}_pruned_heads_docstring.json', 'w') as f:
+            json.dump(pruned_heads, f)
+        with open(f'{self.run_name}_acdcpp{acdcpp_threshold}_num_passes_docstring.json', 'w') as f:
+            json.dump(num_passes, f)
+
     def run(self, save_after_acdcpp=True, save_after_acdc=True):
         os.makedirs(f'ims/{self.run_name}', exist_ok=True)
 
         pruned_heads = {}
         num_passes = {}
         
-        exp = self.setup_exp(threshold=0) # Have to setup exp.corr.nodes for initial ACDCpp run; TODO rewrite run_acdpp run_acdcpp so it does not req an exp object explicitly
+        exp = self.setup_exp(threshold=-1) # Have to setup exp.corr.nodes for initial ACDCpp run; TODO rewrite run_acdpp run_acdcpp so it does not req an exp object explicitly
         acdcpp_attrs = self.run_acdcpp(exp)
 
-        for threshold in tqdm(self.thresholds):
-            exp = self.setup_exp(threshold)
-            acdcpp_heads = self.eval_acdcpp(exp, acdcpp_attrs, threshold)
-            # Only applying threshold to this one as these graphs tend to be HUGE
-            if threshold >= self.save_graphs_after:
-                print('Saving ACDC++ Graph')
-                show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_before_acdc.png')
-            
-            acdc_heads, passes = self.run_acdc(exp)
-
-            print('Saving ACDC Graph')
-            show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_after_acdc.png')
+        for acdcpp_threshold in tqdm(self.acdcpp_thresholds, desc="ACDC++"):
+            # if self.verbose:
+            print(f"{acdcpp_threshold=}")
+            for acdc_threshold in tqdm(self.acdc_thresholds, desc="ACDC"):
+                # if self.verbose:
+                print(f"{acdc_threshold=}")
+                exp = self.setup_exp(acdc_threshold)
+                prepruned_exp, acdcpp_heads = self.eval_acdcpp(exp, acdcpp_attrs, acdcpp_threshold)
+                # Do not save acdcpp-graphs for now.
+                # Only applying threshold to this one as these graphs tend to be HUGE
+                # if acdcpp_threshold >= self.save_graphs_after:
+                #     print('Saving ACDC++ Graph')
+                #     show(exp.corr, fname=f'ims/{self.run_name}/thresh{acdcpp_threshold}_before_acdc.png')
                 
-            pruned_heads[threshold] = [acdcpp_heads, acdc_heads]
-            num_passes[threshold] = passes
-            del exp
+                acdc_heads, passes = self.run_acdc(prepruned_exp)
+
+                print('Saving ACDC Graph')
+                show(prepruned_exp.corr, fname=f'ims/{self.run_name}/thresh{acdc_threshold}_after_acdc.png')
+                    
+                pruned_heads[acdc_threshold] = [acdcpp_heads, acdc_heads]
+                num_passes[acdc_threshold] = passes
+                del prepruned_exp
+
+                t.cuda.empty_cache()
+                self.save(acdcpp_threshold, pruned_heads, num_passes)
             t.cuda.empty_cache()
         t.cuda.empty_cache()
+        
         return pruned_heads, num_passes, acdcpp_attrs # Returning acdcpp attrs directly as they stay the same
