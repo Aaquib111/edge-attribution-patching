@@ -140,7 +140,7 @@ class ACDCPPExperiment():
                 if self.verbose: # Putting this here since tons of things get pruned when doing edges!
                     print(f'NOT PRUNING {parent=} {downstream_component=} with attribution {attr}')
 
-        return exp, get_nodes(exp.corr)
+        return exp
 
     def run_acdc(self, exp: TLACDCExperiment):
         if self.verbose:
@@ -149,7 +149,7 @@ class ACDCPPExperiment():
         while exp.current_node:
             exp.step(testing=False)
 
-        return (get_nodes(exp.corr), get_present_edges(exp.corr), exp.num_passes)
+        return (get_present_edges(exp.corr), exp.num_passes)
 
     def save_combined(self, present_edge_attrs, num_passes):        
         with open(f'res/{self.run_name}/present_edge_attrs.json', 'w') as f:
@@ -193,7 +193,7 @@ class ACDCPPExperiment():
                 # if self.verbose:
                 print(f"{acdc_threshold=}")
                 exp = self.setup_exp(acdc_threshold)
-                prepruned_exp, acdcpp_heads = self.eval_acdcpp(exp, acdcpp_attrs, acdcpp_threshold)
+                prepruned_exp = self.eval_acdcpp(exp, acdcpp_attrs, acdcpp_threshold)
                 # Do not save acdcpp-graphs for now.
                 # Only applying threshold to this one as these graphs tend to be HUGE
                 # if acdcpp_threshold >= self.save_graphs_after:
@@ -215,4 +215,4 @@ class ACDCPPExperiment():
             t.cuda.empty_cache()
         t.cuda.empty_cache()
 
-        return present_edge_attrs, num_passes, acdcpp_attrs # Returning acdcpp attrs directly as they stay the same
+        return present_edge_attrs, num_passes, acdcpp_attrs
