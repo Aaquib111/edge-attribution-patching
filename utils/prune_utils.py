@@ -176,6 +176,18 @@ def get_nodes(correspondence):
                             nodes.add(node_name)
     return nodes
 
+def get_present_edges(correspondence):
+    """
+    Get a list of all present edges and their metric diff when being patched:
+    [parent_hook_name, parent_idx, child_hook_name, child_idx, metric_diff]
+    """
+    edges_list = []
+    for hooknames_idx_of_parent_child, edge_obj in correspondence.all_edges().items():
+        if edge_obj.present and edge_obj.edge_type != EdgeType.PLACEHOLDER:
+            edges_list.append((hooknames_idx_of_parent_child, edge_obj.effect_size))
+    return edges_list
+    
+        
 def acdc_nodes(model: HookedTransformer,
     clean_input: Tensor,
     corrupted_input: Tensor,

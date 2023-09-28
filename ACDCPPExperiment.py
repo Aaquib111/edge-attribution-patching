@@ -3,7 +3,7 @@ import sys
 sys.path.append('Automatic-Circuit-Discovery/')
 
 from acdc.TLACDCExperiment import TLACDCExperiment
-from utils.prune_utils import acdc_nodes, get_nodes, ModelComponent
+from utils.prune_utils import acdc_nodes, get_nodes, get_present_edges, ModelComponent
 from utils.graphics_utils import show
 
 from typing import Callable, List, Literal, Dict, Tuple
@@ -149,19 +149,15 @@ class ACDCPPExperiment():
         while exp.current_node:
             exp.step(testing=False)
 
-        return (get_nodes(exp.corr), exp.num_passes)
+        return (get_nodes(exp.corr), get_present_edges(exp.corr), exp.num_passes)
 
-    def save_acdc(self, acdcpp_threshold, pruned_heads, num_passes):
-        for thresh in pruned_heads.keys():
-            pruned_heads[thresh][0] = list(pruned_heads[thresh][0])
-            pruned_heads[thresh][1] = list(pruned_heads[thresh][1])
-                
-        with open(f'{self.run_name}_acdcpp{acdcpp_threshold}_pruned_heads.json', 'w') as f:
-            json.dump(pruned_heads, f)
-        with open(f'{self.run_name}_acdcpp{acdcpp_threshold}_num_passes.json', 'w') as f:
+    def save_combined(self, present_edge_attrs, num_passes):        
+        with open(f'res/{self.run_name}/present_edge_attrs.json', 'w') as f:
+            json.dump(present_edge_attrs, f)
+        with open(f'res/{self.run_name}/num_passes.json', 'w') as f:
             json.dump(num_passes, f)
     
-    def save_acdcpp(self, acdcpp_attr):
+    def save_acdcpp_edge_attributions(self, acdcpp_attr):
         # # Save results
         def convert_to_torch_index(index_list):
             return ''.join(['None' if i == ':' else i for i in index_list])
@@ -170,23 +166,30 @@ class ACDCPPExperiment():
         for ((e1, i1, _), (e2, i2, _)), attr in acdcpp_attr.items():
             cleaned_attrs.append([e1, convert_to_torch_index(str(i1)), e2, convert_to_torch_index(str(i2)), attr])
                 
-        with open(f'{self.run_name}_acdcpp_only_attrs.json', 'w') as f:
+        with open(f'res/{self.run_name}/acdcpp_only_attrs.json', 'w') as f:
             json.dump(cleaned_attrs, f)
 
     def run(self, save_after_acdcpp=True, save_after_acdc=True):
-        os.makedirs(f'ims/{self.run_name}', exist_ok=True)
-
-        pruned_heads = {}
-        num_passes = {}
-        
+        # Calculate ACDC++ attributions initially, before applying thresholds in sweep
+        os.makedirs(f'res/{self.run_name}', exist_ok=True)
         exp = self.setup_exp(threshold=-1) # Have to setup exp.corr.nodes for initial ACDCpp run; TODO rewrite run_acdpp run_acdcpp so it does not req an exp object explicitly
         acdcpp_attrs = self.run_acdcpp(exp)
-        self.save_acdcpp(acdcpp_attrs)
+        if save_after_acdcpp:
+            self.save_acdcpp_edge_attributions(acdcpp_attrs)
+
+        # Sweep through ACDC++ and ACDC thresholds
+        os.makedirs(f'ims/{self.run_name}', exist_ok=True)
+        num_passes = {}
+        present_edge_attrs = {}
 
         for acdcpp_threshold in tqdm(self.acdcpp_thresholds, desc="ACDC++"):
             # if self.verbose:
             print(f"{acdcpp_threshold=}")
+            num_passes[acdcpp_threshold] = {}
+            present_edge_attrs[acdcpp_threshold] = {}
+
             for acdc_threshold in tqdm(self.acdc_thresholds, desc="ACDC"):
+                # Setup exp for ACDC run on a subgraph pruned by ACDC++ with chosen threshold
                 # if self.verbose:
                 print(f"{acdc_threshold=}")
                 exp = self.setup_exp(acdc_threshold)
@@ -197,18 +200,19 @@ class ACDCPPExperiment():
                 #     print('Saving ACDC++ Graph')
                 #     show(exp.corr, fname=f'ims/{self.run_name}/thresh{acdcpp_threshold}_before_acdc.png')
                 
-                acdc_heads, passes = self.run_acdc(prepruned_exp)
-
+                # Run ACDC on pruned subgraph
+                acdc_edge_attr, passes = self.run_acdc(prepruned_exp)
                 print('Saving ACDC Graph')
                 show(prepruned_exp.corr, fname=f'ims/{self.run_name}/thresh{acdc_threshold}_after_acdc.png')
                     
-                pruned_heads[acdc_threshold] = [acdcpp_heads, acdc_heads]
-                num_passes[acdc_threshold] = passes
-                del prepruned_exp
+                # Save results
+                present_edge_attrs[acdcpp_threshold][acdc_threshold] = acdc_edge_attr
+                num_passes[acdcpp_threshold][acdc_threshold] = passes
+                self.save_combined(present_edge_attrs, num_passes)
 
+                del prepruned_exp
                 t.cuda.empty_cache()
-                self.save_acdc(acdcpp_threshold, pruned_heads, num_passes)
             t.cuda.empty_cache()
         t.cuda.empty_cache()
-        
-        return pruned_heads, num_passes, acdcpp_attrs # Returning acdcpp attrs directly as they stay the same
+
+        return present_edge_attrs, num_passes, acdcpp_attrs # Returning acdcpp attrs directly as they stay the same
