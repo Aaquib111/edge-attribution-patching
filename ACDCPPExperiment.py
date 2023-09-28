@@ -206,8 +206,8 @@ class ACDCPPExperiment():
                 
                 # Run ACDC on pruned subgraph
                 acdc_edge_attr, passes = self.run_acdc(prepruned_exp)
-                print('Saving ACDC Graph')
-                show(prepruned_exp.corr, fname=f'ims/{self.run_name}/thresh{acdc_threshold}_after_acdc.png')
+                # print('Saving ACDC Graph')
+                # show(prepruned_exp.corr, fname=f'ims/{self.run_name}/thresh{acdc_threshold}_after_acdc.png')
                     
                 # Save results
                 present_edge_attrs[acdcpp_threshold][acdc_threshold] = acdc_edge_attr
