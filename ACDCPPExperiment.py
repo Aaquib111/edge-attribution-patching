@@ -151,7 +151,7 @@ class ACDCPPExperiment():
 
         return (get_present_edges(exp.corr), exp.num_passes)
     
-    def convert_to_torch_index(index_list):
+    def convert_to_torch_index(self, index_list):
             return ''.join(['None' if i == ':' else i for i in index_list])
 
     def save_combined(self, present_edge_attrs, num_passes):
