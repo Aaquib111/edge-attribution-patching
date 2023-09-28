@@ -150,21 +150,25 @@ class ACDCPPExperiment():
             exp.step(testing=False)
 
         return (get_present_edges(exp.corr), exp.num_passes)
+    
+    def convert_to_torch_index(index_list):
+            return ''.join(['None' if i == ':' else i for i in index_list])
 
-    def save_combined(self, present_edge_attrs, num_passes):        
+    def save_combined(self, present_edge_attrs, num_passes):
+        cleaned_attrs = []
+        for e1, i1, e2, i2, attr in present_edge_attrs.items():
+            cleaned_attrs.append([e1, self.convert_to_torch_index(str(i1)), e2, self.convert_to_torch_index(str(i2)), attr])
+
         with open(f'res/{self.run_name}/present_edge_attrs.json', 'w') as f:
             json.dump(present_edge_attrs, f)
         with open(f'res/{self.run_name}/num_passes.json', 'w') as f:
             json.dump(num_passes, f)
     
     def save_acdcpp_edge_attributions(self, acdcpp_attr):
-        # # Save results
-        def convert_to_torch_index(index_list):
-            return ''.join(['None' if i == ':' else i for i in index_list])
-
+        # Save results
         cleaned_attrs = []
         for ((e1, i1, _), (e2, i2, _)), attr in acdcpp_attr.items():
-            cleaned_attrs.append([e1, convert_to_torch_index(str(i1)), e2, convert_to_torch_index(str(i2)), attr])
+            cleaned_attrs.append([e1, self.convert_to_torch_index(str(i1)), e2, self.convert_to_torch_index(str(i2)), attr])
                 
         with open(f'res/{self.run_name}/acdcpp_only_attrs.json', 'w') as f:
             json.dump(cleaned_attrs, f)
