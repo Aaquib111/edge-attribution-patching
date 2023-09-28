@@ -156,9 +156,9 @@ class ACDCPPExperiment():
             pruned_heads[thresh][0] = list(pruned_heads[thresh][0])
             pruned_heads[thresh][1] = list(pruned_heads[thresh][1])
                 
-        with open(f'{self.run_name}_acdcpp{acdcpp_threshold}_pruned_heads_docstring.json', 'w') as f:
+        with open(f'{self.run_name}_acdcpp{acdcpp_threshold}_pruned_heads.json', 'w') as f:
             json.dump(pruned_heads, f)
-        with open(f'{self.run_name}_acdcpp{acdcpp_threshold}_num_passes_docstring.json', 'w') as f:
+        with open(f'{self.run_name}_acdcpp{acdcpp_threshold}_num_passes.json', 'w') as f:
             json.dump(num_passes, f)
     
     def save_acdcpp(self, acdcpp_attr):
