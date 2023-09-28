@@ -5,22 +5,22 @@ strict digraph "" {
 		splines=true
 	];
 	"<a3.6>"	[color=black,
-		fillcolor="#fc30ac",
+		fillcolor="#408faa",
 		fontname=Helvetica,
 		shape=box,
 		style="filled, rounded"];
 	"<resid_post>"	[color=black,
-		fillcolor="#e01f40",
+		fillcolor="#24ce60",
 		fontname=Helvetica,
 		shape=box,
 		style="filled, rounded"];
-	"<a3.6>" -> "<resid_post>"	[color="#fc30ac",
+	"<a3.6>" -> "<resid_post>"	[color="#408faa",
 		penwidth=2.8068289756774902];
 	"<a3.0>"	[color=black,
-		fillcolor="#343651",
+		fillcolor="#71b418",
 		fontname=Helvetica,
 		shape=box,
 		style="filled, rounded"];
-	"<a3.0>" -> "<resid_post>"	[color="#343651",
+	"<a3.0>" -> "<resid_post>"	[color="#71b418",
 		penwidth=2.6453909873962402];
 }

@@ -156,7 +156,7 @@ class ACDCPPExperiment():
 
     def save_combined(self, present_edge_attrs, num_passes):
         cleaned_attrs = []
-        for e1, i1, e2, i2, attr in present_edge_attrs.items():
+        for [e1, i1, e2, i2], attr in present_edge_attrs.items():
             cleaned_attrs.append([e1, self.convert_to_torch_index(str(i1)), e2, self.convert_to_torch_index(str(i2)), attr])
 
         with open(f'res/{self.run_name}/present_edge_attrs.json', 'w') as f:
