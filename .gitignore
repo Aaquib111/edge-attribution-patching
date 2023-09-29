@@ -8,8 +8,9 @@ ioi_task/__pycache__/*
 ims/*.png
 ioi_task/ims/*.png
 docstring_task/ims/*.png
+greaterthan_task/ims/*
+thresh_sweep/ims/*
 .python-version
 ims/*
 .python-version
-greaterthan_task/ims/*
 .vscode

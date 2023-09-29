@@ -196,11 +196,11 @@ class ACDCPPExperiment():
                 # show(prepruned_exp.corr, fname=f'ims/{self.run_name}/thresh{acdc_threshold}_after_acdc.png')
                     
                 # Save results
-                present_edge_attrs[acdcpp_threshold][acdc_threshold] = acdc_edge_attr
+                present_edge_attrs[acdcpp_threshold][acdc_threshold] = self.convert_edge_attr_to_list(acdc_edge_attr)
                 num_passes[acdcpp_threshold][acdc_threshold] = passes
                 if save_after_acdc:
                     with open(f'res/{self.run_name}/present_edge_attrs.json', 'w') as f:
-                        json.dump(self.convert_edge_attr_to_list(present_edge_attrs), f)
+                        json.dump(present_edge_attrs, f)
                     with open(f'res/{self.run_name}/num_passes.json', 'w') as f:
                         json.dump(num_passes, f)
 
