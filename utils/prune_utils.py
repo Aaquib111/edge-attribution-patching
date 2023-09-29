@@ -178,15 +178,15 @@ def get_nodes(correspondence):
 
 def get_present_edges(correspondence):
     """
-    Get a list of all present edges and their metric diff when being patched:
-    [parent_hook_name, parent_idx, child_hook_name, child_idx, metric_diff]
+    Get a list of all present edges and their metric diff when being patched
     """
-    edges_list = []
-    for hooknames_idx_of_parent_child, edge_obj in correspondence.all_edges().items():
+    present_edges_list: Dict[Tuple[ModelComponent, ModelComponent], float] = {} # We use a list of floats as we may be splitting by position
+    for hook_points, edge_obj in correspondence.all_edges().items():
         if edge_obj.present and edge_obj.edge_type != EdgeType.PLACEHOLDER:
-            edges_list.append((hooknames_idx_of_parent_child, edge_obj.effect_size))
-    return edges_list
-    
+            parent = ModelComponent(hook_point_name=hook_points[0], index=hook_points[1], incoming_edge_type=None) # incoming_edge_type unknown
+            child = ModelComponent(hook_point_name=hook_points[2], index=hook_points[3], incoming_edge_type=None) # incoming_edge_type unknown
+            present_edges_list[parent, child] = edge_obj.effect_size
+    return present_edges_list
         
 def acdc_nodes(model: HookedTransformer,
     clean_input: Tensor,

@@ -151,29 +151,12 @@ class ACDCPPExperiment():
 
         return (get_present_edges(exp.corr), exp.num_passes)
     
-    def convert_to_torch_index(self, index_list):
-            return ''.join(['None' if i == ':' else i for i in index_list])
-
-    def save_combined(self, present_edge_attrs, num_passes):
-        print(present_edge_attrs)
-        print(num_passes)
+    def convert_edge_attr_to_list(self, edge_attr):
+        convert_to_torch_index = lambda index_list: ''.join(['None' if i == ':' else i for i in index_list])
         cleaned_attrs = []
-        for [e1, i1, e2, i2], attr in present_edge_attrs.items():
-            cleaned_attrs.append([e1, self.convert_to_torch_index(str(i1)), e2, self.convert_to_torch_index(str(i2)), attr])
-
-        with open(f'res/{self.run_name}/present_edge_attrs.json', 'w') as f:
-            json.dump(present_edge_attrs, f)
-        with open(f'res/{self.run_name}/num_passes.json', 'w') as f:
-            json.dump(num_passes, f)
-    
-    def save_acdcpp_edge_attributions(self, acdcpp_attr):
-        # Save results
-        cleaned_attrs = []
-        for ((e1, i1, _), (e2, i2, _)), attr in acdcpp_attr.items():
-            cleaned_attrs.append([e1, self.convert_to_torch_index(str(i1)), e2, self.convert_to_torch_index(str(i2)), attr])
-                
-        with open(f'res/{self.run_name}/acdcpp_only_attrs.json', 'w') as f:
-            json.dump(cleaned_attrs, f)
+        for ((e1, i1, _), (e2, i2, _)), attr in edge_attr.items():
+            cleaned_attrs.append([e1, convert_to_torch_index(str(i1)), e2, convert_to_torch_index(str(i2)), attr])
+        return cleaned_attrs
 
     def run(self, save_after_acdcpp=True, save_after_acdc=True):
         # Calculate ACDC++ attributions initially, before applying thresholds in sweep
@@ -181,7 +164,8 @@ class ACDCPPExperiment():
         exp = self.setup_exp(threshold=-1) # Have to setup exp.corr.nodes for initial ACDCpp run; TODO rewrite run_acdpp run_acdcpp so it does not req an exp object explicitly
         acdcpp_attrs = self.run_acdcpp(exp)
         if save_after_acdcpp:
-            self.save_acdcpp_edge_attributions(acdcpp_attrs)
+            with open(f'res/{self.run_name}/acdcpp_only_attrs.json', 'w') as f:
+                json.dump(self.convert_edge_attr_to_list(acdcpp_attrs), f)
 
         # Sweep through ACDC++ and ACDC thresholds
         os.makedirs(f'ims/{self.run_name}', exist_ok=True)
@@ -214,7 +198,11 @@ class ACDCPPExperiment():
                 # Save results
                 present_edge_attrs[acdcpp_threshold][acdc_threshold] = acdc_edge_attr
                 num_passes[acdcpp_threshold][acdc_threshold] = passes
-                self.save_combined(present_edge_attrs, num_passes)
+                if save_after_acdc:
+                    with open(f'res/{self.run_name}/present_edge_attrs.json', 'w') as f:
+                        json.dump(self.convert_edge_attr_to_list(present_edge_attrs), f)
+                    with open(f'res/{self.run_name}/num_passes.json', 'w') as f:
+                        json.dump(num_passes, f)
 
                 del prepruned_exp
                 t.cuda.empty_cache()
