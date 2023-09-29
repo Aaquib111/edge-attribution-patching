@@ -12,6 +12,11 @@ import tqdm.notebook as tqdm
 
 from typing import Union, Dict, Optional
 
+def replace_parens(tup):
+    '''
+        Method to standardize the TorchIndex of components to a string
+    '''
+    return str(tup).replace('(', '[').replace(')', ']').replace('[None,]', '[None]').replace('None', ':')
 
 def get_node_name(node: TLACDCInterpNode, show_full_index=True):
     """Node name for use in pretty graphs"""
@@ -74,7 +79,7 @@ def generate_random_color(colorscheme: str) -> str:
         """
         return "#{:02x}{:02x}{:02x}".format(rgb[0], rgb[1], rgb[2])
 
-    return rgb2hex((np.random.randint(0, 256), np.random.randint(0, 256), np.random.randint(0, 256)))
+    return rgb2hex((np.random.randint(120, 256), np.random.randint(120, 256), np.random.randint(120, 256)))
 
 def build_colorscheme(correspondence, colorscheme: str = "Pastel2", show_full_index=True) -> Dict[str, str]:
     colors = {}
@@ -82,8 +87,28 @@ def build_colorscheme(correspondence, colorscheme: str = "Pastel2", show_full_in
         colors[get_node_name(node, show_full_index=show_full_index)] = generate_random_color(colorscheme)
     return colors
 
+def get_node_color(node_name):
+    if '<a' in node_name:
+        # Attention head
+        return '#1f77b4'
+    elif '<m' in node_name:
+        return '#ff7f0e'
+    else:
+        return '#7f7f7f'
+    
+def get_edge_props(edge_name, edge_to_attr):
+    if edge_to_attr[edge_name] < 0:
+        edge_color = '#d62728'
+    else:
+        edge_color = '#2ca02c'
+
+    edge_width = abs(edge_to_attr[edge_name])
+    
+    return edge_width, edge_color
+
 def show(
     correspondence: TLACDCInterpNode,
+    edge_to_attr: dict = None,
     fname=None,
     colorscheme: Union[Dict, str] = "Pastel2",
     minimum_penwidth: float = 0.3,
@@ -128,10 +153,10 @@ def show(
             for parent_hook_name in correspondence.edges[child_hook_name][child_index]:
                 for parent_index in correspondence.edges[child_hook_name][child_index][parent_hook_name]:
                     edge = correspondence.edges[child_hook_name][child_index][parent_hook_name][parent_index]
-
+                    edge_name=f'{child_hook_name}{replace_parens(child_index)}{parent_hook_name}{replace_parens(parent_index)}'
                     parent = correspondence.graph[parent_hook_name][parent_index]
                     child = correspondence.graph[child_hook_name][child_index]
-
+                    
                     parent_name = get_node_name(parent, show_full_index=show_full_index)
                     child_name = get_node_name(child, show_full_index=show_full_index)
                     
@@ -140,7 +165,7 @@ def show(
                             continue
                         parent_name = parent_name.replace("_q>", ">").replace("_k>", ">").replace("_v>", ">")
                         child_name = child_name.replace("_q>", ">").replace("_k>", ">").replace("_v>", ">")
-
+                        
                     if remove_self_loops and parent_name == child_name:
                         # Important this go after the qkv removal
                         continue
@@ -153,7 +178,7 @@ def show(
                                 maybe_pos["pos"] = node_pos[node_name]
                             g.add_node(
                                 node_name,
-                                fillcolor=colors[node_name],
+                                fillcolor=get_node_color(node_name),
                                 color="black",
                                 style="filled, rounded",
                                 shape="box",
@@ -161,11 +186,17 @@ def show(
                                 **maybe_pos,
                             )
                         
+                        if not edge_to_attr or not edge_name in edge_to_attr:
+                            edge_width = minimum_penwidth * 2
+                            edge_color = get_node_color(parent_name)
+                        else:
+                            edge_width, edge_color = get_edge_props(edge_name, edge_to_attr)
+                            
                         g.add_edge(
                             parent_name,
                             child_name,
-                            penwidth=str(minimum_penwidth * 2),
-                            color=colors[parent_name],
+                            penwidth=edge_width,
+                            color=edge_color,
                         )
     if fname is not None:
         base_fname = ".".join(str(fname).split(".")[:-1])

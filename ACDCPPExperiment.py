@@ -3,7 +3,7 @@ import sys
 sys.path.append('Automatic-Circuit-Discovery/')
 
 from acdc.TLACDCExperiment import TLACDCExperiment
-from utils.prune_utils import acdc_nodes, get_nodes
+from utils.prune_utils import acdc_nodes, get_nodes, parse_relevant_edges
 from utils.graphics_utils import show
 
 from typing import Callable, List, Literal
@@ -26,6 +26,8 @@ class ACDCPPExperiment():
         thresholds: List[float],
         run_name: str,
         save_graphs_after: float,
+        run_acdcpp: bool = True,
+        run_acdc: bool = False,
         verbose: bool = False,
         attr_absolute_val: bool = True,
         zero_ablation: bool = False,
@@ -44,6 +46,9 @@ class ACDCPPExperiment():
 
         self.run_name = run_name
         self.verbose = verbose
+        
+        self.do_run_acdcpp = run_acdcpp
+        self.do_run_acdc = run_acdc
         
         self.acdc_metric = acdc_metric
         self.acdcpp_metric = acdcpp_metric
@@ -80,6 +85,7 @@ class ACDCPPExperiment():
             # save_graphs_after=self.save_graphs_after,
             online_cache_cpu=False,
             corrupted_cache_cpu=False,
+            abs_value_threshold=self.attr_absolute_val,
             verbose=self.verbose,
             **self.acdc_args
         )
@@ -118,32 +124,57 @@ class ACDCPPExperiment():
         while exp.current_node:
             exp.step(testing=False)
 
-        return (get_nodes(exp.corr), exp.num_passes)
-
+        return (get_nodes(exp.corr), exp.num_passes, exp.edge_attrs)
+    
     def run(self, save_after_acdcpp=True, save_after_acdc=True):
         os.makedirs(f'ims/{self.run_name}', exist_ok=True)
 
         pruned_heads = {}
         num_passes = {}
-        pruned_attrs = {}
-
+        acdcpp_pruned_attrs = {}
+        acdc_pruned_attrs = {}
+        edges_after_acdcpp = {}
+        edges_after_acdc = {}
+        
+        acdcpp_heads = []
+        acdc_heads = []
+        passes = 0
+        acdcpp_attrs = {}
+        acdc_attrs = {}
+        
         for threshold in tqdm(self.thresholds):
+            threshold = round(threshold, 7)
             exp = self.setup_exp(threshold)
-            acdcpp_heads, attrs = self.run_acdcpp(exp, threshold)
-            # Only applying threshold to this one as these graphs tend to be HUGE
-            if threshold >= self.save_graphs_after:
-                print('Saving ACDC++ Graph')
-                show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_before_acdc.png')
+            if self.do_run_acdcpp:
+                acdcpp_heads, acdcpp_attrs = self.run_acdcpp(exp, threshold)
+                # Only applying threshold to this one as these graphs tend to be HUGE
+                #
+                #    print('Saving ACDC++ Graph')
+                if self.pruning_mode == 'edge':
+                    edges_after_acdcpp[threshold] = parse_relevant_edges(exp)
+                    if threshold >= self.save_graphs_after:
+                        show(exp.corr, edge_to_attr=acdcpp_attrs, fname=f'ims/{self.run_name}/thresh{threshold}_before_acdc.png')
+                else:
+                    if threshold >= self.save_graphs_after:
+                        show(exp.corr, acdcpp_attrs, fname=f'ims/{self.run_name}/thresh{threshold}_before_acdc.png')
             
-            acdc_heads, passes = self.run_acdc(exp)
+            if self.do_run_acdc:
+                acdc_heads, passes, acdc_attrs = self.run_acdc(exp)
+                if threshold >= self.save_graphs_after:
+                    print('Saving ACDC Graph')
+                    show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_after_acdc.png')
 
-            print('Saving ACDC Graph')
-            show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_after_acdc.png')
-                
+                if self.pruning_mode == 'edge':
+                    edges_after_acdc[threshold] = parse_relevant_edges(exp)
+
             pruned_heads[threshold] = [acdcpp_heads, acdc_heads]
             num_passes[threshold] = passes
-            pruned_attrs[threshold] = attrs
+            acdcpp_pruned_attrs[threshold] = acdcpp_attrs
+            acdc_pruned_attrs[threshold] = acdc_attrs
             del exp
             t.cuda.empty_cache()
         t.cuda.empty_cache()
-        return pruned_heads, num_passes, pruned_attrs
+        if self.pruning_mode == 'edge':
+            return pruned_heads, num_passes, acdcpp_pruned_attrs, acdc_pruned_attrs, edges_after_acdcpp, edges_after_acdc
+        else:
+            return pruned_heads, num_passes, acdcpp_pruned_attrs, acdc_pruned_attrs

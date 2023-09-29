@@ -17,7 +17,19 @@ from typing import Callable, Tuple, Literal, Dict, Optional, List, Union, Set
 from utils.graphics_utils import get_node_name
 from typing import NamedTuple
 
-ModelComponent = NamedTuple("ModelComponent", [("hook_point_name", str), ("index", TorchIndex), ("incoming_edge_type", str)]) # Abstraction for a node in the computational graph. TODO: move this into ACDC repo when standardised. TODO make incoming_edge_type an enum that's hashable
+ModelComponentTuple = NamedTuple("ModelComponent", [("hook_point_name", str), ("index", TorchIndex), ("incoming_edge_type", str)]) # Abstraction for a node in the computational graph. TODO: move this into ACDC repo when standardised. TODO make incoming_edge_type an enum that's hashable
+
+# Wrapper for the tuple, defines a hashing function
+class ModelComponent(ModelComponentTuple):
+    def replace_parens(self, tup):
+        '''
+            Method to standardize the TorchIndex of components to a string
+        '''
+        return str(tup).replace('(', '[').replace(')', ']').replace('[None,]', '[None]')
+    
+    def __hash__(self):
+        # Just concats all strings and hashes it, strings unique for all components
+        return hash(f'{self.hook_point_name}{self.replace_parens(self.index)}{self.incoming_edge_type}')
 
 def remove_redundant_node(exp, node, safe=True, allow_fails=True):
         if safe:
@@ -176,6 +188,82 @@ def get_nodes(correspondence):
                             nodes.add(node_name)
     return nodes
 
+def get_relevant_edges(exp):
+    '''
+        Returns Dict[ModelComponent, List[ModelComponent]], 
+        where the first key is a downstream component and value
+        is a list of parents pointing to the downstream component
+    '''
+    # Setup the upstream components
+    relevant_nodes: List = [
+        node 
+        for node in exp.corr.nodes() 
+        if node.incoming_edge_type in [EdgeType.ADDITION, EdgeType.DIRECT_COMPUTATION]
+    ]
+
+    components = {} 
+
+    for relevant_node in tqdm(relevant_nodes, desc="Edge pruning"): # TODO ideally we should batch compute things in this loop
+        parents = set([
+            ModelComponent(
+                hook_point_name=node.name, 
+                index=node.index, 
+                incoming_edge_type=str(node.incoming_edge_type)
+            ) 
+            for node in relevant_node.parents
+        ])
+        if relevant_node.name in ['blocks.0.hook_q_input', 'blocks.0.hook_k_input' 'blocks.0.hook_v_input']:
+            for p in parents:
+                new_p = ModelComponent(
+                    hook_point_name=p.hook_point_name,
+                    index=p.index,
+                    incoming_edge_type=str(EdgeType.ADDITION)
+                )
+                parents.remove(p)
+                parents.add(new_p)
+                
+        downstream_component = ModelComponent(
+            hook_point_name=relevant_node.name, 
+            index=relevant_node.index, 
+            incoming_edge_type=str(relevant_node.incoming_edge_type)
+        )
+        relevant_parents = []
+        for parent in parents:
+            if "." in parent.hook_point_name and "." in downstream_component.hook_point_name: 
+                # hook_embed and hook_pos_embed have no . but should always be connected anyway
+                upstream_layer = int(parent.hook_point_name.split(".")[1])
+                downstream_layer = int(downstream_component.hook_point_name.split(".")[1])
+                if upstream_layer > downstream_layer:
+                    continue
+                if upstream_layer == downstream_layer and (parent.hook_point_name.endswith("mlp_out") or 
+                        downstream_component.hook_point_name.endswith(("q_input", "k_input", "v_input"))):
+                    # Other cases where upstream is actually after downstream!
+                    continue
+                relevant_parents.append(parent)
+        components[downstream_component] = relevant_parents
+        
+    return components
+
+def parse_relevant_edges(exp):
+    # TODO: Find better way to do this whole method
+    relevant_edges = get_relevant_edges(exp)
+    parsed_edges = set()
+    for downstream_component in relevant_edges.keys():
+        for parent in relevant_edges[downstream_component]:
+            edge_tuple = (downstream_component.hook_point_name, downstream_component.index, parent.hook_point_name, parent.index)
+            try:
+                edge = exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]]
+            except KeyError:
+                # If we get a KeyError, the edge has been pruned 
+                continue
+            if edge.present:
+                # If we get here, the edge has not been pruned and does exist
+                str_downstream_idx = downstream_component.replace_parens(downstream_component.index)
+                str_parent_idx = parent.replace_parens(parent.index)
+                parsed_edges.add(f'{edge_tuple[0]}{str_downstream_idx}{edge_tuple[2]}{str_parent_idx}')
+
+    return parsed_edges
+
 def acdc_nodes(model: HookedTransformer,
     clean_input: Tensor,
     corrupted_input: Tensor,
@@ -247,32 +335,34 @@ def acdc_nodes(model: HookedTransformer,
         return pruned_nodes_attr
     
     elif mode == "edge":
-        # Setup the upstream components
-        relevant_nodes: List = [node for node in exp.corr.nodes() if node.incoming_edge_type in [EdgeType.ADDITION, EdgeType.DIRECT_COMPUTATION]]
-
+        relevant_edges = get_relevant_edges(exp)
+        
         results: Dict[Tuple[ModelComponent, ModelComponent], float] = {} # We use a list of floats as we may be splitting by position
         
-        for relevant_node in tqdm(relevant_nodes, desc="Edge pruning"): # TODO ideally we should batch compute things in this loop
-            parents = set([ModelComponent(hook_point_name=node.name, index=node.index, incoming_edge_type=str(node.incoming_edge_type)) for node in relevant_node.parents])
-            downstream_component = ModelComponent(hook_point_name=relevant_node.name, index=relevant_node.index, incoming_edge_type=str(relevant_node.incoming_edge_type))
-            for parent in parents:
-                if "." in parent.hook_point_name and "." in downstream_component.hook_point_name: # hook_embed and hook_pos_embed have no . but should always be connected anyway
-                    upstream_layer = int(parent.hook_point_name.split(".")[1])
-                    downstream_layer = int(downstream_component.hook_point_name.split(".")[1])
-                    if upstream_layer > downstream_layer:
-                        continue
-                    if upstream_layer == downstream_layer and (parent.hook_point_name.endswith("mlp_out") or downstream_component.hook_point_name.endswith(("q_input", "k_input", "v_input"))):
-                        # Other cases where upstream is actually after downstream!
-                        continue
-
-                print(f'Pruning {parent=} {downstream_component=}')
-                fwd_cache_hook_name = parent.hook_point_name if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.hook_point_name
-                fwd_cache_index = parent.index if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.index
-                current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[fwd_cache_hook_name][fwd_cache_index.as_index] - corrupted_cache[fwd_cache_hook_name][fwd_cache_index.as_index])).sum()
-
+        for downstream_component in tqdm(relevant_edges.keys(), desc="Edge pruning"): 
+            # TODO ideally we should batch compute things in this loop
+            for parent in relevant_edges[downstream_component]:
+                if verbose:
+                    print(f'Pruning {parent=} {downstream_component=}')
+                fwd_cache_hook_name = (
+                    parent.hook_point_name 
+                    if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) 
+                    else downstream_component.hook_point_name
+                )
+                fwd_cache_index = (
+                    parent.index 
+                    if downstream_component.incoming_edge_type == str(EdgeType.ADDITION)
+                    else downstream_component.index
+                )
+                current_result = (
+                    clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * 
+                    (clean_cache[fwd_cache_hook_name][fwd_cache_index.as_index] - 
+                    corrupted_cache[fwd_cache_hook_name][fwd_cache_index.as_index])
+                ).sum().cpu()
+                
+                results[f'{downstream_component.hook_point_name}{downstream_component.replace_parens(downstream_component.index)}{parent.hook_point_name}{parent.replace_parens(parent.index)}'] = current_result.item()
                 if attr_absolute_val: 
                     current_result = current_result.abs()
-                results[parent, downstream_component] = current_result.item()
 
                 # for position in exp.positions: # TODO add this back in!
                 should_prune = current_result < threshold
@@ -280,7 +370,7 @@ def acdc_nodes(model: HookedTransformer,
                     edge_tuple = (downstream_component.hook_point_name, downstream_component.index, parent.hook_point_name, parent.index)
                     exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
                     exp.corr.remove_edge(*edge_tuple)
-
+                    #print('Pruning')
                 else:
                     if verbose: # Putting this here since tons of things get pruned when doing edges!
                         print(f'NOT PRUNING {parent=} {downstream_component=} with attribution {current_result}')
