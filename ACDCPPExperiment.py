@@ -155,6 +155,8 @@ class ACDCPPExperiment():
             return ''.join(['None' if i == ':' else i for i in index_list])
 
     def save_combined(self, present_edge_attrs, num_passes):
+        print(present_edge_attrs)
+        print(num_passes)
         cleaned_attrs = []
         for [e1, i1, e2, i2], attr in present_edge_attrs.items():
             cleaned_attrs.append([e1, self.convert_to_torch_index(str(i1)), e2, self.convert_to_torch_index(str(i2)), attr])
