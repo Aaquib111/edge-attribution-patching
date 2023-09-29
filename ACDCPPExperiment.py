@@ -149,7 +149,7 @@ class ACDCPPExperiment():
         while exp.current_node:
             exp.step(testing=False)
 
-        return (get_present_edges(exp.corr), exp.num_passes)
+        return (get_present_edges(exp.corr), exp.num_passes, get_nodes(exp.corr))
     
     def convert_edge_attr_to_list(self, edge_attr):
         convert_to_torch_index = lambda index_list: ''.join(['None' if i == ':' else i for i in index_list])
@@ -171,12 +171,14 @@ class ACDCPPExperiment():
         os.makedirs(f'ims/{self.run_name}', exist_ok=True)
         num_passes = {}
         present_edge_attrs = {}
+        present_nodes = {} 
 
         for acdcpp_threshold in tqdm(self.acdcpp_thresholds, desc="ACDC++"):
             # if self.verbose:
             print(f"{acdcpp_threshold=}")
             num_passes[acdcpp_threshold] = {}
             present_edge_attrs[acdcpp_threshold] = {}
+            present_nodes[acdcpp_threshold] = {}
 
             for acdc_threshold in tqdm(self.acdc_thresholds, desc="ACDC"):
                 # Setup exp for ACDC run on a subgraph pruned by ACDC++ with chosen threshold
@@ -191,17 +193,20 @@ class ACDCPPExperiment():
                 #     show(exp.corr, fname=f'ims/{self.run_name}/thresh{acdcpp_threshold}_before_acdc.png')
                 
                 # Run ACDC on pruned subgraph
-                acdc_edge_attr, passes = self.run_acdc(prepruned_exp)
+                acdc_edge_attr, passes, acdc_present_nodes = self.run_acdc(prepruned_exp)
                 # print('Saving ACDC Graph')
                 # show(prepruned_exp.corr, fname=f'ims/{self.run_name}/thresh{acdc_threshold}_after_acdc.png')
                     
                 # Save results
                 present_edge_attrs[acdcpp_threshold][acdc_threshold] = self.convert_edge_attr_to_list(acdc_edge_attr)
                 num_passes[acdcpp_threshold][acdc_threshold] = passes
+                present_nodes[acdcpp_threshold][acdc_threshold] = acdc_present_nodes
                 if save_after_acdc:
                     with open(f'res/{self.run_name}/present_edge_attrs.json', 'w') as f:
                         json.dump(present_edge_attrs, f)
                     with open(f'res/{self.run_name}/num_passes.json', 'w') as f:
+                        json.dump(num_passes, f)
+                    with open(f'res/{self.run_name}/present_nodes.json', 'w') as f:
                         json.dump(num_passes, f)
 
                 del prepruned_exp
