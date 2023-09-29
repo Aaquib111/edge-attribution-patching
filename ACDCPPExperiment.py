@@ -207,7 +207,7 @@ class ACDCPPExperiment():
                     with open(f'res/{self.run_name}/num_passes.json', 'w') as f:
                         json.dump(num_passes, f)
                     with open(f'res/{self.run_name}/present_nodes.json', 'w') as f:
-                        json.dump(num_passes, f)
+                        json.dump(present_nodes, f)
 
                 del prepruned_exp
                 t.cuda.empty_cache()
