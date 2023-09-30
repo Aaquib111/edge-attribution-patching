@@ -1,4 +1,4 @@
-apt update && apt upgrade
+apt update && apt -y upgrade
 
 git init
 git remote set-url origin https://Aaquib111:$github_token@github.com/Aaquib111/acdcpp.git
