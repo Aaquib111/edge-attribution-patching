@@ -148,7 +148,7 @@ def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["nod
     return clean_cache, corrupted_cache, clean_grad_cache
 
 def get_nodes(correspondence):
-    nodes = set()
+    nodes = []
     for child_hook_name in correspondence.edges:
         for child_index in correspondence.edges[child_hook_name]:
             for parent_hook_name in correspondence.edges[child_hook_name][child_index]:
@@ -173,7 +173,7 @@ def get_nodes(correspondence):
                     if edge.present and edge.edge_type != EdgeType.PLACEHOLDER:
                         #print(f'Edge from {parent_name=} to {child_name=}')
                         for node_name in [parent_name, child_name]:
-                            nodes.add(node_name)
+                            nodes.append(node_name)
     return nodes
 
 def get_present_edges(correspondence):
