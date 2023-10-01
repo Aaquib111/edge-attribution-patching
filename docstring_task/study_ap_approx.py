@@ -126,7 +126,7 @@ acdcpp_exp = ACDCPPExperiment(
     corr_dataset.toks,
     negative_abs_ioi_metric,
     negative_abs_ioi_metric,
-    threshold_dummy,
+    [threshold_dummy],
     run_name=RUN_NAME,
     verbose=False,
     attr_absolute_val=False,
@@ -144,7 +144,6 @@ sorted_ap_attr = sorted(attr_results.items(), key=lambda x: abs(x[1]), reverse=T
 #%%
 
 for idx in range(20):
-
     (sender_component, receiver_component), ap_val = sorted_ap_attr[idx]
     print(
         f"Sender component: {sender_component}, receiver component: {receiver_component}, ap_val: {ap_val}"
@@ -174,11 +173,11 @@ for idx in range(20):
     interpolated_metrics = []
     for interpolation in torch.linspace(0, 1, 101):
         # acdc_exp.global_cache.corrupted_cache[sender_node_name][sender_node_index.as_index] = (interpolation * original_corrupted_cache_value_cpu + (-interpolation+1.0) * original_online_cache_value_cpu).to(device)
-
         edge.mask = interpolation
         acdc_exp.update_cur_metric()
         intermediate_metric = acdc_exp.cur_metric
         interpolated_metrics.append(intermediate_metric)
+    edge.mask = 0.0
 
     # Plot the interpolated metrics
     # Clear fig for next iteration
