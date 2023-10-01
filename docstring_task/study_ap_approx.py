@@ -150,7 +150,7 @@ acdcpp_exp = ACDCPPExperiment(
     [threshold_dummy],
     run_name=RUN_NAME,
     verbose=False,
-    zero_ablation=False,
+    zero_ablation=True,
     attr_absolute_val=False,
     save_graphs_after=0,
     pruning_mode="edge",
