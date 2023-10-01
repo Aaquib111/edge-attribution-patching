@@ -120,12 +120,13 @@ print(f'Clean metric: {clean_metric}, Corrupt metric: {corrupt_metric}')
 
 threshold_dummy = -100.0 # Does not make a difference when only running edge based attribution patching, as all attributions are saved in the result dict anyways
 RUN_NAME = 'greaterthan_edge_absval'
+model.reset_hooks()
 acdcpp_exp = ACDCPPExperiment(
     model,
     clean_dataset.toks,
     corr_dataset.toks,
-    negative_abs_ioi_metric,
-    negative_abs_ioi_metric,
+    negative_ioi_metric,
+    negative_ioi_metric,
     [threshold_dummy],
     run_name=RUN_NAME,
     verbose=False,
@@ -143,7 +144,7 @@ sorted_ap_attr = sorted(attr_results.items(), key=lambda x: abs(x[1]), reverse=T
 
 #%%
 
-for idx in range(20):
+for idx in range(2, 5):
     (sender_component, receiver_component), ap_val = sorted_ap_attr[idx]
     print(
         f"Sender component: {sender_component}, receiver component: {receiver_component}, ap_val: {ap_val}"
@@ -155,13 +156,23 @@ for idx in range(20):
     original_corrupted_cache_value_cpu = acdc_exp.global_cache.corrupted_cache[sender_node_name][sender_node_index.as_index].cpu()
     original_online_cache_value_cpu = acdc_exp.global_cache.online_cache[sender_node_name][sender_node_index.as_index].cpu()
 
+    acdc_exp.update_cur_metric()
     original_metric = acdc_exp.cur_metric
     original_edges = acdc_exp.count_no_edges()
 
-    acdc_exp.add_receiver_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=True, prepend=True)
-
     edge=acdc_exp.corr.edges[receiver_node_name][receiver_node_index][sender_node_name][sender_node_index]
     edge.mask = 1.0
+    
+    if "addition" in str(edge.edge_type).lower():
+        ret = acdc_exp.add_receiver_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=False, prepend=True)
+    elif "direct" in str(edge.edge_type).lower():
+        ret = acdc_exp.add_receiver_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=True, prepend=True)
+        added_sender_hook = acdc_exp.add_sender_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=True)
+    else:
+        raise ValueError(f"Unknown edge type: {edge.edge_type}")
+
+    if not ret: 
+        print("Warning, hook already exists" + str(edge.edge_type))
 
     acdc_exp.update_cur_metric()
     new_metric = acdc_exp.cur_metric
@@ -172,7 +183,6 @@ for idx in range(20):
 
     interpolated_metrics = []
     for interpolation in torch.linspace(0, 1, 101):
-        # acdc_exp.global_cache.corrupted_cache[sender_node_name][sender_node_index.as_index] = (interpolation * original_corrupted_cache_value_cpu + (-interpolation+1.0) * original_online_cache_value_cpu).to(device)
         edge.mask = interpolation
         acdc_exp.update_cur_metric()
         intermediate_metric = acdc_exp.cur_metric
