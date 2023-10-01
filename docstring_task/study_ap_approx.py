@@ -16,8 +16,9 @@ if ipython is not None:
     ipython.magic('autoreload 2')
 import torch as t
 import torch
+import gc
 from torch import Tensor
-
+from ACDCPPExperiment import ACDCPPExperiment
 from acdc.docstring.utils import get_all_docstring_things
 from acdc.TLACDCExperiment import TLACDCExperiment
 
@@ -47,23 +48,33 @@ def abs_docstring_metric(logits):
 
 tl_model.reset_hooks()
 RUN_NAME = 'abs_edges'
-exp = TLACDCExperiment(
-    model=tl_model,
-    threshold=-100.0, # So nothing gets pruned
-    run_name="ap_approx_run",
-    ds=test_data,
-    ref_ds=test_patch_data,
-    metric=test_metrics['docstring_metric'],
-    zero_ablation=False,
-    online_cache_cpu=False,
-    corrupted_cache_cpu=False,
-    verbose=True,
+acdcpp_exp = ACDCPPExperiment(
+    tl_model,
+    test_data,
+    test_patch_data,
+    test_metrics['docstring_metric'],
+    abs_docstring_metric,
+    thresholds=[-100.0],
+    run_name="arthur_acdcpp_approx",
+    verbose=False,
+    attr_absolute_val=True,
+    save_graphs_after=0,
+    pruning_mode='edge',
+    no_pruned_nodes_attr=1,
     using_wandb=False,
 )
+acdc_exp = acdcpp_exp.setup_exp(- 100.0)
 
 #%%
 
-# Sanity check saving these norms to ensure ACDCPP isn't doing anything weird
+exp = acdc_exp
+
+#%%
+
+ground_truth = torch.load(os.path.expanduser('~/acdcpp/TLACDCExperiment_norms.pt'))
+
+#%%
+
 cached_norms = {
     "corrupted": {}, 
     "online": {},
@@ -75,7 +86,17 @@ for cache_name, cache in zip(
 ):
     for node in cache:
         cached_norms[cache_name][node] = cache[node].norm().item()
-torch.save(cached_norms, os.path.expanduser(f'~/acdcpp/TLACDCExperiment_norms.pt'))
+
+torch.save(cached_norms, os.path.expanduser(f'~/acdcpp/ACDCPP_norms.pt'))
+
+#%%
+
+# Assert all these norms are the same
+for node in cached_norms['corrupted']:
+    torch.testing.assert_allclose(cached_norms['corrupted'][node], ground_truth['corrupted'][node], atol=1e-5, rtol=1e-5)
+
+for node in cached_norms['online']:
+    torch.testing.assert_allclose(cached_norms['online'][node], ground_truth['online'][node], atol=1e-5, rtol=1e-5)
 
 #%%
 
