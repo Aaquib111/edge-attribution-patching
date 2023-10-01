@@ -55,7 +55,7 @@ acdcpp_exp = ACDCPPExperiment(
     test_data,
     test_patch_data,
     test_metrics['docstring_metric'],
-    abs_docstring_metric,
+    test_metrics['docstring_metric'],
     thresholds=[-100.0],
     run_name="arthur_acdcpp_approx",
     verbose=True,
@@ -84,11 +84,11 @@ sorted_ap_attr = sorted(ap_attr.items(), key=lambda x: abs(x[1]), reverse=True)
 # From here likely we're going to wrap this in a function
 # TODO to reset the online cache, probably we need resetup a TLACDCExperiment???
 
-(sender_component, receiver_component), ap_val = sorted_ap_attr[2]
+(sender_component, receiver_component), ap_val = sorted_ap_attr[1]
 print(
     f"Sender component: {sender_component}, receiver component: {receiver_component}, ap_val: {ap_val}"
 )
-assert "addition" in str(acdc_exp.corr.graph[receiver_component.hook_point_name][receiver_component.index].incoming_edge_type).lower()
+# assert "addition" in str(acdc_exp.corr.graph[receiver_component.hook_point_name][receiver_component.index].incoming_edge_type).lower()
 
 # %%
 
@@ -151,9 +151,7 @@ for interpolation in torch.linspace(0, 1, 101):
 plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), interpolated_metrics)
 plt.xlabel('Interpolation')
 plt.ylabel('Metric')
-plt.title('Interpolated metric')
-
-# Label the x=0 point as "Clean edge"
+# plt.title('Interpolated metric')
 
 plt.annotate(
     'Clean edge',
