@@ -190,33 +190,33 @@ class ACDCPPExperiment():
                 # Setup exp for ACDC run on a subgraph pruned by ACDC++ with chosen threshold
                 # if self.verbose:
                 print(f"{acdc_threshold=}")
-                # exp = self.setup_exp(acdc_threshold)
-                # prepruned_exp = self.eval_acdcpp(exp, acdcpp_attrs, acdcpp_threshold)
-                # # Do not save acdcpp-graphs for now.
-                # # Only applying threshold to this one as these graphs tend to be HUGE
-                # # if acdcpp_threshold >= self.save_graphs_after:
-                # #     print('Saving ACDC++ Graph')
-                # #     show(exp.corr, fname=f'ims/{self.run_name}/thresh{acdcpp_threshold}_before_acdc.png')
+                exp = self.setup_exp(acdc_threshold)
+                prepruned_exp = self.eval_acdcpp(exp, acdcpp_attrs, acdcpp_threshold)
+                # Do not save acdcpp-graphs for now.
+                # Only applying threshold to this one as these graphs tend to be HUGE
+                # if acdcpp_threshold >= self.save_graphs_after:
+                #     print('Saving ACDC++ Graph')
+                #     show(exp.corr, fname=f'ims/{self.run_name}/thresh{acdcpp_threshold}_before_acdc.png')
                 
-                # # Run ACDC on pruned subgraph
-                # acdc_edge_attr, passes, acdc_present_nodes = self.run_acdc(prepruned_exp)
-                # # print('Saving ACDC Graph')
-                # # show(prepruned_exp.corr, fname=f'ims/{self.run_name}/thresh{acdc_threshold}_after_acdc.png')
+                # Run ACDC on pruned subgraph
+                acdc_edge_attr, passes, acdc_present_nodes = self.run_acdc(prepruned_exp)
+                # print('Saving ACDC Graph')
+                # show(prepruned_exp.corr, fname=f'ims/{self.run_name}/thresh{acdc_threshold}_after_acdc.png')
                     
-                # # Save results
-                # present_edge_attrs[acdcpp_threshold][acdc_threshold] = self.convert_edge_attr_to_list(acdc_edge_attr)
-                # num_passes[acdcpp_threshold][acdc_threshold] = passes
-                # present_nodes[acdcpp_threshold][acdc_threshold] = acdc_present_nodes
-                # if save_after_acdc:
-                #     with open(f'res/{self.run_name}/present_edge_attrs.json', 'w') as f:
-                #         json.dump(present_edge_attrs, f)
-                #     with open(f'res/{self.run_name}/num_passes.json', 'w') as f:
-                #         json.dump(num_passes, f)
-                #     with open(f'res/{self.run_name}/present_nodes.json', 'w') as f:
-                #         json.dump(present_nodes, f)
+                # Save results
+                present_edge_attrs[acdcpp_threshold][acdc_threshold] = self.convert_edge_attr_to_list(acdc_edge_attr)
+                num_passes[acdcpp_threshold][acdc_threshold] = passes
+                present_nodes[acdcpp_threshold][acdc_threshold] = acdc_present_nodes
+                if save_after_acdc:
+                    with open(f'res/{self.run_name}/present_edge_attrs.json', 'w') as f:
+                        json.dump(present_edge_attrs, f)
+                    with open(f'res/{self.run_name}/num_passes.json', 'w') as f:
+                        json.dump(num_passes, f)
+                    with open(f'res/{self.run_name}/present_nodes.json', 'w') as f:
+                        json.dump(present_nodes, f)
 
-                # del prepruned_exp
-                # t.cuda.empty_cache()
+                del prepruned_exp
+                t.cuda.empty_cache()
             t.cuda.empty_cache()
         t.cuda.empty_cache()
 
