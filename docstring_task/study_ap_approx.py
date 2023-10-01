@@ -18,6 +18,7 @@ import torch as t
 import torch
 import gc
 from torch import Tensor
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 from ACDCPPExperiment import ACDCPPExperiment
 from acdc.docstring.utils import get_all_docstring_things
 from acdc.TLACDCExperiment import TLACDCExperiment
@@ -56,48 +57,69 @@ acdcpp_exp = ACDCPPExperiment(
     abs_docstring_metric,
     thresholds=[-100.0],
     run_name="arthur_acdcpp_approx",
-    verbose=False,
+    verbose=True,
     attr_absolute_val=True,
     save_graphs_after=0,
     pruning_mode='edge',
     no_pruned_nodes_attr=1,
     using_wandb=False,
 )
-acdc_exp = acdcpp_exp.setup_exp(- 100.0)
+acdc_exp = acdcpp_exp.setup_exp(-100.0)
+# (We tested this gives what we want) 
 
 #%%
 
-exp = acdc_exp
+ap_attr: Dict[Any, float]
+
+# Do attribution patching
+nodes, ap_attr = acdcpp_exp.run_acdcpp(acdc_exp, threshold = -100.0) # Ablate nothing 
+
+# %%
+
+sorted_ap_attr = sorted(ap_attr.items(), key=lambda x: x[1], reverse=True)
+
+# %%
+
+# From here likely we're going to wrap this in a function
+# TODO to reset the online cache, probably we need resetup a TLACDCExperiment???
+
+sender_component, receiver_component = sorted_ap_attr[1][0]
+
+# %%
+
+sender_node_name, sender_node_index = sender_component.hook_point_name, sender_component.index
+
+# %%
+
+receiver_node_name, receiver_node_index = receiver_component.hook_point_name, receiver_component.index
+
+# %%
+
+original_corrupted_cache_value_cpu = acdc_exp.global_cache.corrupted_cache[sender_node_name][sender_node_index.as_index].cpu()
+
+# %%
+
+original_metric = acdc_exp.cur_metric
+original_edges = acdc_exp.count_no_edges()
+
+# %%
+
+acdc_exp.add_receiver_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=True, prepend=True)
 
 #%%
 
-ground_truth = torch.load(os.path.expanduser('~/acdcpp/TLACDCExperiment_norms.pt'))
+acdc_exp.corr.edges[receiver_node_name][receiver_node_index][sender_node_name][sender_node_index].present = False
 
-#%%
+# %%
 
-cached_norms = {
-    "corrupted": {}, 
-    "online": {},
-}
-for cache_name, cache in zip(
-    ["corrupted", "online"],
-    [exp.global_cache.corrupted_cache, exp.global_cache.online_cache],
-    strict=False,
-):
-    for node in cache:
-        cached_norms[cache_name][node] = cache[node].norm().item()
+acdc_exp.update_cur_metric()
+new_metric = acdc_exp.cur_metric
 
-torch.save(cached_norms, os.path.expanduser(f'~/acdcpp/ACDCPP_norms.pt'))
+# %%
 
-#%%
+print(
+    f"Original metric: {original_metric:.10f}, new metric: {new_metric:.10f}"
+)
 
-# Assert all these norms are the same
-for node in cached_norms['corrupted']:
-    torch.testing.assert_allclose(cached_norms['corrupted'][node], ground_truth['corrupted'][node], atol=1e-5, rtol=1e-5)
+# %%
 
-for node in cached_norms['online']:
-    torch.testing.assert_allclose(cached_norms['online'][node], ground_truth['online'][node], atol=1e-5, rtol=1e-5)
-
-#%%
-
-# With respect to one edge, we want to see the Attribution patching effects
