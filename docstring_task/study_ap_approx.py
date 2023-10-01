@@ -11,6 +11,7 @@ sys.path.append('..')
 sys.path.append('../Automatic-Circuit-Discovery/')
 sys.path.append('../tracr/')
 import IPython
+import plotly.express as px
 from IPython import get_ipython
 ipython = get_ipython()
 if ipython is not None:
@@ -25,111 +26,131 @@ import matplotlib.pyplot as plt
 from jaxtyping import Float
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 from ACDCPPExperiment import ACDCPPExperiment
-from acdc.docstring.utils import get_all_docstring_things
+from acdc.docstring.utils import get_all_docstring_things, get_docstring_subgraph_true_edges
 from acdc.TLACDCExperiment import TLACDCExperiment
 
 device = t.device("cuda" if t.cuda.is_available() else "CPU")
 print(device)
+TASK: Literal["docstring", "ioi"] = "docstring"
 
 #%%
 
-model = HookedTransformer.from_pretrained(
-    'gpt2-small',
-    center_writing_weights=False,
-    center_unembed=False,
-    fold_ln=False,
-    device=device,
-)
-model.set_use_hook_mlp_in(True)
-model.set_use_split_qkv_input(True)
-model.set_use_attn_result(True)
+if TASK == "ioi":
+    model = HookedTransformer.from_pretrained(
+        'gpt2-small',
+        center_writing_weights=False,
+        center_unembed=False,
+        fold_ln=False,
+        device=device,
+    )
+    model.set_use_hook_mlp_in(True)
+    model.set_use_split_qkv_input(True)
+    model.set_use_attn_result(True)
 
-# %%
+    from ioi_task.ioi_dataset import IOIDataset, format_prompt, make_table
+    N = 25
+    clean_dataset = IOIDataset(
+        prompt_type='mixed',
+        N=N,
+        tokenizer=model.tokenizer,
+        prepend_bos=False,
+        seed=1,
+        device=device
+    )
+    corr_dataset = clean_dataset.gen_flipped_prompts('ABC->XYZ, BAB->XYZ')
 
-from ioi_task.ioi_dataset import IOIDataset, format_prompt, make_table
-N = 25
-clean_dataset = IOIDataset(
-    prompt_type='mixed',
-    N=N,
-    tokenizer=model.tokenizer,
-    prepend_bos=False,
-    seed=1,
-    device=device
-)
-corr_dataset = clean_dataset.gen_flipped_prompts('ABC->XYZ, BAB->XYZ')
+    make_table(
+    colnames = ["IOI prompt", "IOI subj", "IOI indirect obj", "ABC prompt"],
+    cols = [
+        map(format_prompt, clean_dataset.sentences),
+        model.to_string(clean_dataset.s_tokenIDs).split(),
+        model.to_string(clean_dataset.io_tokenIDs).split(),
+        map(format_prompt, clean_dataset.sentences),
+    ],
+    title = "Sentences from IOI vs ABC distribution",
+    )
 
-make_table(
-  colnames = ["IOI prompt", "IOI subj", "IOI indirect obj", "ABC prompt"],
-  cols = [
-    map(format_prompt, clean_dataset.sentences),
-    model.to_string(clean_dataset.s_tokenIDs).split(),
-    model.to_string(clean_dataset.io_tokenIDs).split(),
-    map(format_prompt, clean_dataset.sentences),
-  ],
-  title = "Sentences from IOI vs ABC distribution",
-)
+    def ave_logit_diff(
+        logits: Float[Tensor, 'batch seq d_vocab'],
+        ioi_dataset: IOIDataset,
+        per_prompt: bool = False
+    ):
+        '''
+            Return average logit difference between correct and incorrect answers
+        '''
+        # Get logits for indirect objects
+        io_logits = logits[range(logits.size(0)), ioi_dataset.word_idx['end'], ioi_dataset.io_tokenIDs]
+        s_logits = logits[range(logits.size(0)), ioi_dataset.word_idx['end'], ioi_dataset.s_tokenIDs]
+        # Get logits for subject
+        logit_diff = io_logits - s_logits
+        return logit_diff if per_prompt else logit_diff.mean()
 
-def ave_logit_diff(
-    logits: Float[Tensor, 'batch seq d_vocab'],
-    ioi_dataset: IOIDataset,
-    per_prompt: bool = False
-):
-    '''
-        Return average logit difference between correct and incorrect answers
-    '''
-    # Get logits for indirect objects
-    io_logits = logits[range(logits.size(0)), ioi_dataset.word_idx['end'], ioi_dataset.io_tokenIDs]
-    s_logits = logits[range(logits.size(0)), ioi_dataset.word_idx['end'], ioi_dataset.s_tokenIDs]
-    # Get logits for subject
-    logit_diff = io_logits - s_logits
-    return logit_diff if per_prompt else logit_diff.mean()
+    with t.no_grad():
+        clean_logits = model(clean_dataset.toks)
+        corrupt_logits = model(corr_dataset.toks)
+        clean_logit_diff = ave_logit_diff(clean_logits, clean_dataset).item()
+        corrupt_logit_diff = ave_logit_diff(corrupt_logits, corr_dataset).item()
 
-with t.no_grad():
-    clean_logits = model(clean_dataset.toks)
-    corrupt_logits = model(corr_dataset.toks)
-    clean_logit_diff = ave_logit_diff(clean_logits, clean_dataset).item()
-    corrupt_logit_diff = ave_logit_diff(corrupt_logits, corr_dataset).item()
+    def ioi_metric(
+        logits: Float[Tensor, "batch seq_len d_vocab"],
+        corrupted_logit_diff: float = corrupt_logit_diff,
+        clean_logit_diff: float = clean_logit_diff,
+        ioi_dataset: IOIDataset = clean_dataset
+    ):
+        patched_logit_diff = ave_logit_diff(logits, ioi_dataset)
+        return (patched_logit_diff - corrupted_logit_diff) / (clean_logit_diff - corrupted_logit_diff)
 
-def ioi_metric(
-    logits: Float[Tensor, "batch seq_len d_vocab"],
-    corrupted_logit_diff: float = corrupt_logit_diff,
-    clean_logit_diff: float = clean_logit_diff,
-    ioi_dataset: IOIDataset = clean_dataset
- ):
-    patched_logit_diff = ave_logit_diff(logits, ioi_dataset)
-    return (patched_logit_diff - corrupted_logit_diff) / (clean_logit_diff - corrupted_logit_diff)
+    def abs_ioi_metric(logits: Float[Tensor, "batch seq_len d_vocab"]):
+        return abs(ioi_metric(logits))
 
-def abs_ioi_metric(logits: Float[Tensor, "batch seq_len d_vocab"]):
-    return abs(ioi_metric(logits))
+    def negative_ioi_metric(logits: Float[Tensor, "batch seq_len d_vocab"]):
+        return -ioi_metric(logits)
 
-def negative_ioi_metric(logits: Float[Tensor, "batch seq_len d_vocab"]):
-    return -ioi_metric(logits)
+    def negative_abs_ioi_metric(logits: Float[Tensor, "batch seq_len d_vocab"]):
+        return -abs_ioi_metric(logits)
 
-def negative_abs_ioi_metric(logits: Float[Tensor, "batch seq_len d_vocab"]):
-    return -abs_ioi_metric(logits)
+    # Get clean and corrupt logit differences
+    with t.no_grad():
+        clean_metric = ioi_metric(clean_logits, corrupt_logit_diff, clean_logit_diff, clean_dataset)
+        corrupt_metric = ioi_metric(corrupt_logits, corrupt_logit_diff, clean_logit_diff, corr_dataset)
 
-# Get clean and corrupt logit differences
-with t.no_grad():
-    clean_metric = ioi_metric(clean_logits, corrupt_logit_diff, clean_logit_diff, clean_dataset)
-    corrupt_metric = ioi_metric(corrupt_logits, corrupt_logit_diff, clean_logit_diff, corr_dataset)
+    print(f'Clean direction: {clean_logit_diff}, Corrupt direction: {corrupt_logit_diff}')
+    print(f'Clean metric: {clean_metric}, Corrupt metric: {corrupt_metric}')
 
-print(f'Clean direction: {clean_logit_diff}, Corrupt direction: {corrupt_logit_diff}')
-print(f'Clean metric: {clean_metric}, Corrupt metric: {corrupt_metric}')
+elif TASK == "docstring":
+    all_docstring_items = get_all_docstring_things(num_examples=40, seq_len=5, device=device, metric_name='docstring_metric', correct_incorrect_wandb=False)
+
+    model = all_docstring_items.tl_model
+    validation_metric = all_docstring_items.validation_metric
+    validation_data = all_docstring_items.validation_data
+    validation_labels = all_docstring_items.validation_labels
+    validation_patch_data = all_docstring_items.validation_patch_data
+    test_metrics = all_docstring_items.test_metrics
+    test_data = all_docstring_items.test_data
+    test_labels = all_docstring_items.test_labels
+    test_patch_data = all_docstring_items.test_patch_data
+
+    def abs_docstring_metric(logits):
+        return -abs(test_metrics['docstring_metric'](logits))
+
+else:
+    raise ValueError(f"Unknown task: {TASK}")
 
 #%%
 
 threshold_dummy = -100.0 # Does not make a difference when only running edge based attribution patching, as all attributions are saved in the result dict anyways
-RUN_NAME = 'greaterthan_edge_absval'
+RUN_NAME = 'docstring_and_ioi_noddling'
 model.reset_hooks()
 acdcpp_exp = ACDCPPExperiment(
     model,
-    clean_dataset.toks,
-    corr_dataset.toks,
-    negative_ioi_metric,
-    negative_ioi_metric,
+    clean_dataset.toks if TASK == "ioi" else test_data,
+    corr_dataset.toks if TASK == "ioi" else test_patch_data, 
+    negative_ioi_metric if TASK == "ioi" else test_metrics['docstring_metric'],
+    negative_ioi_metric if TASK == "ioi" else test_metrics['docstring_metric'],
     [threshold_dummy],
     run_name=RUN_NAME,
     verbose=False,
+    zero_ablation=False,
     attr_absolute_val=False,
     save_graphs_after=0,
     pruning_mode="edge",
@@ -137,7 +158,6 @@ acdcpp_exp = ACDCPPExperiment(
 )
 acdc_exp = acdcpp_exp.setup_exp(threshold=threshold_dummy)
 nodes, attr_results = acdcpp_exp.run_acdcpp(exp=acdc_exp, threshold=threshold_dummy)
-acdc_exp = acdcpp_exp.setup_exp(threshold=threshold_dummy) # Give us back the correct hooks...
 
 #%%
 
@@ -145,8 +165,12 @@ sorted_ap_attr = sorted(attr_results.items(), key=lambda x: abs(x[1]), reverse=T
 
 #%%
 
-for idx in range(20):
+ends = []
+just_store_ends = True
+NUM_COMPONENTS = 100
+for idx in tqdm(range(NUM_COMPONENTS)):
     (sender_component, receiver_component), ap_val = sorted_ap_attr[idx]
+
     print(
         f"Sender component: {sender_component}, receiver component: {receiver_component}, ap_val: {ap_val}"
     )
@@ -172,11 +196,15 @@ for idx in range(20):
 
     edge.mask = 1.0
     acdc_exp.update_cur_metric()
+    edge.mask = 0.0
     new_metric = acdc_exp.cur_metric
 
     print(
         f"Original metric: {original_metric:.10f}, new metric: {new_metric:.10f}"
     )
+    ends.append(original_metric - new_metric)
+    if just_store_ends:
+        continue
 
     interpolated_metrics = []
     for interpolation in torch.linspace(0, 1, 101):
@@ -227,5 +255,29 @@ for idx in range(20):
     plt.tight_layout()
     plt.savefig(fname)
     plt.show()
+
+# %%
+
+true_edges = get_docstring_subgraph_true_edges()
+
+#%%
+
+if just_store_ends:
+    ap_vals = [x[1] for x in sorted_ap_attr[:NUM_COMPONENTS]]
+
+    sender_components = [x[0][0] for x in sorted_ap_attr[:NUM_COMPONENTS]]
+    receiver_components = [x[0][1] for x in sorted_ap_attr[:NUM_COMPONENTS]]
+    labels = [f"{x.hook_point_name}{x.index} -> {y.hook_point_name}{y.index}" for x, y in zip(sender_components, receiver_components)]
+
+    px.scatter(
+        x = torch.tensor(ends).abs(),
+        y = torch.tensor(ap_vals).abs(),
+        labels = {
+            "x": "Activation Patching metric",
+            "y": "Attribution Patching metric",
+        },
+        title = "Activation Patching metric vs Attribution Patching metric",
+        hover_name = labels,
+    ).show()
 
 # %%

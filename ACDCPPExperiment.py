@@ -105,6 +105,7 @@ class ACDCPPExperiment():
                 threshold=threshold,
                 exp=exp,
                 verbose=self.verbose,
+                zero_ablation=self.zero_ablation,
                 attr_absolute_val=self.attr_absolute_val,
                 mode=self.pruning_mode,
             )

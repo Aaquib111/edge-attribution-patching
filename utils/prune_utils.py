@@ -184,6 +184,7 @@ def acdc_nodes(model: HookedTransformer,
     exp: TLACDCExperiment,
     verbose: bool = False,
     attr_absolute_val: bool = False,
+    zero_ablation: bool = False,
     mode: Literal["node", "edge"]="node",
 ) -> Dict: # TODO label this dict more precisely for the edge vs node methods
     '''
@@ -201,6 +202,10 @@ def acdc_nodes(model: HookedTransformer,
     '''
     # get the 2 fwd and 1 bwd caches; cache "normalized" and "result" of attn layers
     clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(model, clean_input, corrupted_input, metric, mode=mode)
+
+    if zero_ablation:
+        corrupted_cache = exp.global_cache.corrupted_cache
+
     if mode == "node":
         # compute first-order Taylor approximation for each node to get the attribution
         clean_head_act = clean_cache.stack_head_results()
