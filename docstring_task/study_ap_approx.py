@@ -137,6 +137,7 @@ acdcpp_exp = ACDCPPExperiment(
 )
 acdc_exp = acdcpp_exp.setup_exp(threshold=threshold_dummy)
 nodes, attr_results = acdcpp_exp.run_acdcpp(exp=acdc_exp, threshold=threshold_dummy)
+acdc_exp = acdcpp_exp.setup_exp(threshold=threshold_dummy) # Give us back the correct hooks...
 
 #%%
 
@@ -144,7 +145,7 @@ sorted_ap_attr = sorted(attr_results.items(), key=lambda x: abs(x[1]), reverse=T
 
 #%%
 
-for idx in range(2, 5):
+for idx in range(20):
     (sender_component, receiver_component), ap_val = sorted_ap_attr[idx]
     print(
         f"Sender component: {sender_component}, receiver component: {receiver_component}, ap_val: {ap_val}"
@@ -155,25 +156,21 @@ for idx in range(2, 5):
 
     original_corrupted_cache_value_cpu = acdc_exp.global_cache.corrupted_cache[sender_node_name][sender_node_index.as_index].cpu()
     original_online_cache_value_cpu = acdc_exp.global_cache.online_cache[sender_node_name][sender_node_index.as_index].cpu()
+    edge=acdc_exp.corr.edges[receiver_node_name][receiver_node_index][sender_node_name][sender_node_index]    
 
-    acdc_exp.update_cur_metric()
-    original_metric = acdc_exp.cur_metric
-    original_edges = acdc_exp.count_no_edges()
-
-    edge=acdc_exp.corr.edges[receiver_node_name][receiver_node_index][sender_node_name][sender_node_index]
-    edge.mask = 1.0
-    
+    acdc_exp.model.reset_hooks() # When dealing with just one edge, we can be aggressive
     if "addition" in str(edge.edge_type).lower():
-        ret = acdc_exp.add_receiver_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=False, prepend=True)
+        assert acdc_exp.add_receiver_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=False, prepend=True)
     elif "direct" in str(edge.edge_type).lower():
-        ret = acdc_exp.add_receiver_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=True, prepend=True)
-        added_sender_hook = acdc_exp.add_sender_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=True)
+        assert acdc_exp.add_receiver_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=False, prepend=True)
+        assert acdc_exp.add_sender_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=True)
     else:
         raise ValueError(f"Unknown edge type: {edge.edge_type}")
 
-    if not ret: 
-        print("Warning, hook already exists" + str(edge.edge_type))
+    acdc_exp.update_cur_metric()
+    original_metric = acdc_exp.cur_metric
 
+    edge.mask = 1.0
     acdc_exp.update_cur_metric()
     new_metric = acdc_exp.cur_metric
 
