@@ -1,10 +1,19 @@
 #%%
 
-"""
-Boilerplate taken from acdcpp_docstring.ipynb
-"""
+"""Copy and pasted from acdc repo launch_sixteen_heads.py, but with the following changes:"""
 
+import math
+from IPython import get_ipython
+
+if get_ipython() is not None:
+    get_ipython().run_line_magic('load_ext', 'autoreload')
+    get_ipython().run_line_magic('autoreload', '2')
+
+import argparse
+import gc
+from copy import deepcopy
 import os
+import numpy as np
 import sys
 from tqdm import tqdm
 sys.path.append('..')
@@ -12,11 +21,10 @@ sys.path.append('../Automatic-Circuit-Discovery/')
 sys.path.append('../tracr/')
 import IPython
 import plotly.express as px
-from IPython import get_ipython
-ipython = get_ipython()
-if ipython is not None:
-    ipython.magic('load_ext autoreload')
-    ipython.magic('autoreload 2')
+
+import torch
+import wandb
+from transformer_lens import HookedTransformer 
 import torch as t
 import torch
 from transformer_lens import HookedTransformer
@@ -28,12 +36,53 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 from ACDCPPExperiment import ACDCPPExperiment
 from acdc.docstring.utils import get_all_docstring_things, get_docstring_subgraph_true_edges
 from acdc.TLACDCExperiment import TLACDCExperiment
+from acdc.TLACDCCorrespondence import TLACDCCorrespondence
+from acdc.TLACDCInterpNode import TLACDCInterpNode
+from acdc.acdc_utils import (
+    cleanup,
+    ct,
+    get_roc_figure,
+    kl_divergence,
+    make_nd_dict,
+    shuffle_tensor,
+    get_points,
+)
 
-device = t.device("cuda" if t.cuda.is_available() else "CPU")
-print(device)
+from acdc.TLACDCEdge import (
+    Edge,
+    EdgeType,
+    TorchIndex,
+)
+
+from acdc.acdc_utils import reset_network
+from acdc.docstring.utils import get_all_docstring_things
+from acdc.greaterthan.utils import get_all_greaterthan_things
+from acdc.induction.utils import (
+    get_all_induction_things,
+    get_good_induction_candidates,
+    get_mask_repeat_candidates,
+    get_validation_data,
+)
+from acdc.ioi.utils import get_all_ioi_things
+from acdc.TLACDCExperiment import TLACDCExperiment
+from acdc.TLACDCInterpNode import TLACDCInterpNode, heads_to_nodes_to_mask
+from acdc.tracr_task.utils import get_all_tracr_things
+from subnetwork_probing.train import iterative_correspondence_from_mask
+from notebooks.emacs_plotly_render import set_plotly_renderer
+
+from subnetwork_probing.transformer_lens.transformer_lens.HookedTransformer import HookedTransformer as SPHookedTransformer
+from subnetwork_probing.transformer_lens.transformer_lens.HookedTransformerConfig import HookedTransformerConfig as SPHookedTransformerConfig
+from subnetwork_probing.train import do_random_resample_caching, do_zero_caching
+from subnetwork_probing.transformer_lens.transformer_lens.hook_points import MaskedHookPoint
+
+set_plotly_renderer("emacs")
+
+#%%
+
 TASK: Literal["docstring", "ioi"] = "docstring"
 
 #%%
+device = t.device("cuda" if t.cuda.is_available() else "CPU")
 
 if TASK == "ioi":
     model = HookedTransformer.from_pretrained(
@@ -135,7 +184,6 @@ elif TASK == "docstring":
 
 else:
     raise ValueError(f"Unknown task: {TASK}")
-
 #%%
 
 threshold_dummy = -100.0 # Does not make a difference when only running edge based attribution patching, as all attributions are saved in the result dict anyways
@@ -151,13 +199,13 @@ acdcpp_exp = ACDCPPExperiment(
     run_name=RUN_NAME,
     verbose=False,
     zero_ablation=True,
-    attr_absolute_val=False,
+    attr_absolute_val=True,
     save_graphs_after=0,
     pruning_mode="edge",
     no_pruned_nodes_attr=1
 )
 acdc_exp = acdcpp_exp.setup_exp(threshold=threshold_dummy)
-do_mean_ablation = True
+do_mean_ablation = False
 if do_mean_ablation:
     corrupted_cache_keys = list(acdc_exp.global_cache.corrupted_cache.keys())
     for key in corrupted_cache_keys:
@@ -166,7 +214,66 @@ nodes, attr_results = acdcpp_exp.run_acdcpp(exp=acdc_exp, threshold=threshold_du
 
 #%%
 
-sorted_ap_attr = sorted(attr_results.items(), key=lambda x: abs(x[1]), reverse=True)
+ap_attr_to_remove = sorted(attr_results.items(), key=lambda x: abs(x[1]), reverse=False)
+
+#%%
+
+true_edges = get_docstring_subgraph_true_edges()
+included_edges = [e for e, present in true_edges.items() if present]
+cnt=0
+for edge_tuple, e in list(acdc_exp.corr.all_edges().items()):
+    e.present=False
+    hashable_edge_tuple = (edge_tuple[0], edge_tuple[1].hashable_tuple, edge_tuple[2], edge_tuple[3].hashable_tuple)
+    if hashable_edge_tuple in included_edges:
+        e.present=True
+        cnt+=1
+assert cnt==len(included_edges), f"Expected {len(included_edges)} edges to be included, but got {cnt}"
+ground_truth = deepcopy(acdc_exp.corr)
+for e in list(acdc_exp.corr.all_edges().values()):
+    e.present=True
+
+#%%
+
+max_subgraph_size = acdc_exp.count_no_edges()
+corrs = []
+for i in tqdm(range(len(ap_attr_to_remove))):
+    # Remove the ith least important edge
+    (sender_component, receiver_component), ap_val = ap_attr_to_remove[i]
+    acdc_exp.corr.edges[receiver_component.hook_point_name][receiver_component.index][sender_component.hook_point_name][sender_component.index].present=False
+    corrs.append(deepcopy(acdc_exp.corr))
+
+#%%
+
+points = get_points(
+    [(c, {"score": 0.0}) for c in corrs], # Can just put empty dicts is we don't care about this?
+    task=TASK,
+    canonical_circuit_subgraph=ground_truth,
+    canonical_circuit_subgraph_size=len(included_edges),
+    max_subgraph_size=max_subgraph_size,
+    decreasing=True,
+)
+
+#%%
+
+def discard_non_pareto_optimal(points, auxiliary, cmp="gt"):
+    ret = []
+    for (x, y), aux in zip(points, auxiliary):
+        for x1, y1 in points:
+            if x1 < x and getattr(y1, f"__{cmp}__")(y) and (x1, y1) != (x, y):
+                break
+        else:
+            ret.append(((x, y), aux))
+    return list(sorted(ret))
+
+xy_points = [(p["edge_fpr"], p["edge_tpr"]) for p in points]
+filtered_points = discard_non_pareto_optimal(xy_points, [{} for _ in points], cmp="gt")
+remmed_second = [x[0] for x in filtered_points]
+
+#%%
+
+fig = get_roc_figure([remmed_second], ["AP"])
+# Save fig as PNG
+fig.write_image(f"roc_{RUN_NAME}.png")
 
 #%%
 
@@ -176,116 +283,61 @@ NUM_COMPONENTS = 1000
 for idx in tqdm(range(NUM_COMPONENTS)):
     (sender_component, receiver_component), ap_val = sorted_ap_attr[idx]
 
-    if "blocks.0.hook_resid_pre" != sender_component.hook_point_name or "blocks.3.hook_k_input" not in receiver_component.hook_point_name: continue
+#%%
 
-    print(
-        f"Sender component: {sender_component}, receiver component: {receiver_component}, ap_val: {ap_val}"
-    )
+# Sort by scores, with least important nodes first
+nodes_names_indices.sort(key=lambda x: prune_scores[x[1]][x[2]].item(), reverse=False)
 
-    sender_node_name, sender_node_index = sender_component.hook_point_name, sender_component.index
-    receiver_node_name, receiver_node_index = receiver_component.hook_point_name, receiver_component.index
-
-    original_corrupted_cache_value_cpu = acdc_exp.global_cache.corrupted_cache[sender_node_name][sender_node_index.as_index].cpu()
-    original_online_cache_value_cpu = acdc_exp.global_cache.online_cache[sender_node_name][sender_node_index.as_index].cpu()
-    edge=acdc_exp.corr.edges[receiver_node_name][receiver_node_index][sender_node_name][sender_node_index]    
-
-    acdc_exp.model.reset_hooks() # When dealing with just one edge, we can be aggressive
-
-    if "addition" in str(edge.edge_type).lower():
-        assert acdc_exp.add_receiver_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=False, prepend=True)
-    elif "direct" in str(edge.edge_type).lower():
-        assert acdc_exp.add_receiver_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=False, prepend=True)
-        assert acdc_exp.add_sender_hook(acdc_exp.corr.graph[receiver_node_name][receiver_node_index], override=True)
-    else:
-        raise ValueError(f"Unknown edge type: {edge.edge_type}")
-
-    acdc_exp.update_cur_metric()
-    original_metric = acdc_exp.cur_metric
-
-    edge.mask = 1.0
-    acdc_exp.update_cur_metric()
-    edge.mask = 0.0
-    new_metric = acdc_exp.cur_metric
-
-    print(
-        f"Original metric: {original_metric:.10f}, new metric: {new_metric:.10f}"
-    )
-    ends.append(original_metric - new_metric)
-    if just_store_ends:
-        continue
-
-    interpolated_metrics = []
-    for interpolation in torch.linspace(0, 1, 101):
-        edge.mask = interpolation
-        acdc_exp.update_cur_metric()
-        intermediate_metric = acdc_exp.cur_metric
-        interpolated_metrics.append(intermediate_metric)
-    edge.mask = 0.0
-
-    # Plot the interpolated metrics
-    # Clear fig for next iteration
-    plt.clf()
-    plt.figure(figsize=(10, 6))  # Adjust the dimensions as necessary
-    plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), interpolated_metrics)
-    plt.xlabel('Interpolation')
-    plt.ylabel('Metric')
-    plt.title('Interpolated metric')
-
-    # Label the x=0 point as "Clean edge"
-
-    plt.annotate(
-        'Clean edge',
-        xy=(0, interpolated_metrics[0]),
-        xytext=(0.2, interpolated_metrics[0]+0.05),
-        # Skinnier arrow and tip
-        arrowprops=dict(facecolor='black', shrink=0.05, width=0.5, headwidth=7),
-    )
-
-    plt.annotate(
-        'Corrupted edge',
-        xy=(1.0, interpolated_metrics[-1]),
-        xytext=(0.5, interpolated_metrics[-1]+0.05),
-        # Skinnier arrow and tip
-        arrowprops=dict(facecolor='black', shrink=0.05, width=0.5, headwidth=7),    
-    )
-
-    # Approximate the tangent line at x=0 and extrapolate to x=1
-    slope_at_zero = (interpolated_metrics[1] - interpolated_metrics[0]) * (len(interpolated_metrics)-1)  # Assuming a step size of 0.01
-    tangent_line = slope_at_zero * torch.linspace(0, 1, len(interpolated_metrics)) + interpolated_metrics[0]
-    plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), tangent_line, linestyle='--')
-    plt.plot(1.0, interpolated_metrics[0] - ap_val, marker='o', color='red') # Kind of annoying property that it seems be negative?
-    plt.xlabel('Interpolation towards corruption')
-    plt.ylabel('Metric')
-    plt.title(f'Corrupting edge {sender_node_name}{sender_node_index} -> {receiver_node_name}{receiver_node_index} (AP value: {-ap_val:.10f})')
-    fname = os.path.expanduser(f"~/acdcpp/ioi_task/edge_{idx}.png")
-
-    # Save the figure with a widened layout
-    plt.tight_layout()
-    plt.savefig(fname)
-    plt.show()
+# %%
+serializable_nodes_names_indices = [(list(map(str, nodes)), name, repr(idx), prune_scores[name][idx].item()) for nodes, name, idx in nodes_names_indices]
+wandb.log({"nodes_names_indices": serializable_nodes_names_indices})
 
 # %%
 
-true_edges = get_docstring_subgraph_true_edges()
+def test_metrics(logits, score):
+    d = {"test_"+k: fn(logits).mean().item() for k, fn in things.test_metrics.items()}
+    d["score"] = score
+    return d
+
+# Log metrics without ablating anything
+logits = do_random_resample_caching(model, things.test_data)
+wandb.log(test_metrics(logits, math.inf))
+
+# %%
+
+do_random_resample_caching(model, things.test_patch_data)
+if args.zero_ablation:
+    do_zero_caching(model)
+
+nodes_to_mask = []
+corr, head_parents = None, None
+for nodes, hook_name, idx in tqdm.tqdm(nodes_names_indices):
+    nodes_to_mask += nodes
+    corr, head_parents = iterative_correspondence_from_mask(model, nodes_to_mask, use_pos_embed=False, newv=False, corr=corr, head_parents=head_parents)
+    for e in corr.all_edges().values():
+        e.effect_size = 1.0
+
+    score = prune_scores[hook_name][idx].item()
+
+    # Delete this module
+    done = False
+    for n, c in model.named_modules():
+        if n == hook_name:
+            assert not done, f"Found {hook_name}[{idx}]twice"
+            with torch.no_grad():
+                c.mask_scores[idx] = 0
+            done = True
+    assert done, f"Could not find {hook_name}[{idx}]"
+
+    to_log_dict = test_metrics(model(things.test_data), score)
+    to_log_dict["number_of_edges"] = corr.count_no_edges()
+
+    print(to_log_dict)
+    wandb.log(to_log_dict)
+
+# %%
+
+wandb.finish()
 
 #%%
 
-if just_store_ends:
-    ap_vals = [x[1] for x in sorted_ap_attr[:NUM_COMPONENTS]]
-
-    sender_components = [x[0][0] for x in sorted_ap_attr[:NUM_COMPONENTS]]
-    receiver_components = [x[0][1] for x in sorted_ap_attr[:NUM_COMPONENTS]]
-    labels = [f"{x.hook_point_name}{x.index} -> {y.hook_point_name}{y.index}" for x, y in zip(sender_components, receiver_components)]
-
-    px.scatter(
-        x = torch.tensor(ends).abs(),
-        y = torch.tensor(ap_vals).abs(),
-        labels = {
-            "x": "Activation Patching metric",
-            "y": "Attribution Patching metric",
-        },
-        title = "Activation Patching metric vs Attribution Patching metric",
-        hover_name = labels,
-    ).show()
-
-# %%
