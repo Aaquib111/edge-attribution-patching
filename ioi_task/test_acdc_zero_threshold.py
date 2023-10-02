@@ -240,6 +240,9 @@ for i in tqdm(range(len(ap_attr_to_remove))):
     # Remove the ith least important edge
     (sender_component, receiver_component), ap_val = ap_attr_to_remove[i]
     acdc_exp.corr.edges[receiver_component.hook_point_name][receiver_component.index][sender_component.hook_point_name][sender_component.index].present=False
+
+    # For each receiver, if it has no outgoing, remove it
+
     corrs.append(deepcopy(acdc_exp.corr))
 
 #%%
