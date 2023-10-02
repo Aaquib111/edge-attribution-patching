@@ -198,7 +198,7 @@ acdcpp_exp = ACDCPPExperiment(
     thresholds=[threshold_dummy],
     run_name=RUN_NAME,
     verbose=False,
-    zero_ablation=True,
+    zero_ablation=False,
     attr_absolute_val=True,
     save_graphs_after=0,
     pruning_mode="edge",
@@ -239,10 +239,24 @@ corrs = []
 for i in tqdm(range(len(ap_attr_to_remove))):
     # Remove the ith least important edge
     (sender_component, receiver_component), ap_val = ap_attr_to_remove[i]
-    acdc_exp.corr.edges[receiver_component.hook_point_name][receiver_component.index][sender_component.hook_point_name][sender_component.index].present=False
+
+    try:
+        acdc_exp.corr.edges[receiver_component.hook_point_name][receiver_component.index][sender_component.hook_point_name][sender_component.index].present=False
+
+        # If the child becomes disconnected, remove it
+        child = acdc_exp.corr.graph[receiver_component.hook_point_name][receiver_component.index]
+        for parent in child.parents:
+            if acdc_exp.corr.edges[receiver_component.hook_point_name][receiver_component.index][parent.name][parent.index].present:
+                break
+        else:
+            print("Removing")
+            acdc_exp.remove_redundant_node(child)
+
+    except Exception as e:
+        print(e)
+        print("Failed to do some things")
 
     # For each receiver, if it has no outgoing, remove it
-
     corrs.append(deepcopy(acdc_exp.corr))
 
 #%%
@@ -276,7 +290,7 @@ remmed_second = [x[0] for x in filtered_points]
 
 fig = get_roc_figure([remmed_second], ["AP"])
 # Save fig as PNG
-fig.write_image(f"roc_{RUN_NAME}.png")
+fig.write_image(f"roc_remove_{RUN_NAME}.png")
 
 #%%
 
