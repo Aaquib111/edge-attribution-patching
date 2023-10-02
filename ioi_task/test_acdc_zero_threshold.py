@@ -14,6 +14,8 @@ import gc
 from copy import deepcopy
 import os
 import numpy as np
+import plotly.graph_objects as go
+import json
 import sys
 from tqdm import tqdm
 sys.path.append('..')
@@ -74,17 +76,27 @@ from subnetwork_probing.transformer_lens.transformer_lens.HookedTransformer impo
 from subnetwork_probing.transformer_lens.transformer_lens.HookedTransformerConfig import HookedTransformerConfig as SPHookedTransformerConfig
 from subnetwork_probing.train import do_random_resample_caching, do_zero_caching
 from subnetwork_probing.transformer_lens.transformer_lens.hook_points import MaskedHookPoint
+from acdc.induction.utils import (
+    get_all_induction_things,
+)
 
-set_plotly_renderer("emacs")
+#%%
+
+TASK: Literal["docstring", "ioi", "induction"] = "induction"
 
 #%%
 
-TASK: Literal["docstring", "ioi"] = "docstring"
-
-#%%
 device = t.device("cuda" if t.cuda.is_available() else "CPU")
 
-if TASK == "ioi":
+if TASK == "induction":
+    num_examples = 50
+    seq_len = 300
+    things = get_all_induction_things(
+        num_examples=num_examples, seq_len=seq_len, device=device, metric="nll", # nll seems best for AP comparison
+    )
+    model=things.tl_model
+
+elif TASK == "ioi":
     model = HookedTransformer.from_pretrained(
         'gpt2-small',
         center_writing_weights=False,
@@ -104,7 +116,7 @@ if TASK == "ioi":
         tokenizer=model.tokenizer,
         prepend_bos=False,
         seed=1,
-        device=device
+        device=device,
     )
     corr_dataset = clean_dataset.gen_flipped_prompts('ABC->XYZ, BAB->XYZ')
 
@@ -167,34 +179,37 @@ if TASK == "ioi":
     print(f'Clean metric: {clean_metric}, Corrupt metric: {corrupt_metric}')
 
 elif TASK == "docstring":
-    all_docstring_items = get_all_docstring_things(num_examples=40, seq_len=5, device=device, metric_name='docstring_metric', correct_incorrect_wandb=False)
+    things = get_all_docstring_things(num_examples=40, seq_len=5, device=device, metric_name='docstring_metric', correct_incorrect_wandb=False)
 
-    model = all_docstring_items.tl_model
-    validation_metric = all_docstring_items.validation_metric
-    validation_data = all_docstring_items.validation_data
-    validation_labels = all_docstring_items.validation_labels
-    validation_patch_data = all_docstring_items.validation_patch_data
-    test_metrics = all_docstring_items.test_metrics
-    test_data = all_docstring_items.test_data
-    test_labels = all_docstring_items.test_labels
-    test_patch_data = all_docstring_items.test_patch_data
+    model = things.tl_model
+    validation_metric = things.validation_metric
+    validation_data = things.validation_data
+    validation_labels = things.validation_labels
+    validation_patch_data = things.validation_patch_data
+    test_metrics = things.test_metrics
+    test_data = things.test_data
+    test_labels = things.test_labels
+    test_patch_data = things.test_patch_data
 
     def abs_docstring_metric(logits):
         return -abs(test_metrics['docstring_metric'](logits))
 
 else:
     raise ValueError(f"Unknown task: {TASK}")
+
 #%%
 
 threshold_dummy = -100.0 # Does not make a difference when only running edge based attribution patching, as all attributions are saved in the result dict anyways
 RUN_NAME = 'docstring_and_ioi_noddling'
+
 model.reset_hooks()
+
 acdcpp_exp = ACDCPPExperiment(
     model,
-    clean_dataset.toks if TASK == "ioi" else test_data,
-    corr_dataset.toks if TASK == "ioi" else test_patch_data, 
-    acdc_metric=negative_ioi_metric if TASK == "ioi" else test_metrics['docstring_metric'],
-    acdcpp_metric=negative_ioi_metric if TASK == "ioi" else abs_docstring_metric,
+    clean_dataset.toks if TASK == "ioi" else things.validation_data,
+    corr_dataset.toks if TASK == "ioi" else things.validation_patch_data,
+    acdc_metric=negative_ioi_metric if TASK == "ioi" else things.validation_metric,
+    acdcpp_metric=negative_ioi_metric if TASK == "ioi" else things.validation_metric, # TODO do abs_docstring thing???
     thresholds=[threshold_dummy],
     run_name=RUN_NAME,
     verbose=False,
@@ -218,46 +233,75 @@ ap_attr_to_remove = sorted(attr_results.items(), key=lambda x: abs(x[1]), revers
 
 #%%
 
-true_edges = get_docstring_subgraph_true_edges()
-included_edges = [e for e, present in true_edges.items() if present]
-cnt=0
-for edge_tuple, e in list(acdc_exp.corr.all_edges().items()):
-    e.present=False
-    hashable_edge_tuple = (edge_tuple[0], edge_tuple[1].hashable_tuple, edge_tuple[2], edge_tuple[3].hashable_tuple)
-    if hashable_edge_tuple in included_edges:
+if TASK == "docstring":
+    true_edges = get_docstring_subgraph_true_edges()
+    included_edges = [e for e, present in true_edges.items() if present]
+    cnt=0
+    for edge_tuple, e in list(acdc_exp.corr.all_edges().items()):
+        e.present=False
+        hashable_edge_tuple = (edge_tuple[0], edge_tuple[1].hashable_tuple, edge_tuple[2], edge_tuple[3].hashable_tuple)
+        if hashable_edge_tuple in included_edges:
+            e.present=True
+            cnt+=1
+    assert cnt==len(included_edges), f"Expected {len(included_edges)} edges to be included, but got {cnt}"
+    ground_truth = deepcopy(acdc_exp.corr)
+    for e in list(acdc_exp.corr.all_edges().values()):
         e.present=True
-        cnt+=1
-assert cnt==len(included_edges), f"Expected {len(included_edges)} edges to be included, but got {cnt}"
-ground_truth = deepcopy(acdc_exp.corr)
-for e in list(acdc_exp.corr.all_edges().values()):
-    e.present=True
 
 #%%
 
-max_subgraph_size = acdc_exp.count_no_edges()
+# Resetup experiment with test stuff
+
+test_acdcpp_exp = ACDCPPExperiment(
+    model,
+    clean_dataset.toks if TASK == "ioi" else things.test_data,
+    corr_dataset.toks if TASK == "ioi" else things.test_patch_data,
+    acdc_metric=negative_ioi_metric if TASK == "ioi" else things.validation_metric,
+    acdcpp_metric=negative_ioi_metric if TASK == "ioi" else things.validation_metric, # TODO do abs_docstring thing???
+    thresholds=[threshold_dummy],
+    run_name=RUN_NAME,
+    verbose=False,
+    zero_ablation=False,
+    attr_absolute_val=True,
+    save_graphs_after=0,
+    pruning_mode="edge",
+    no_pruned_nodes_attr=1
+)
+test_acdc_exp = test_acdcpp_exp.setup_exp(threshold=threshold_dummy)
+acdc_exp.model.reset_hooks()
+acdc_exp.setup_model_hooks(
+    add_sender_hooks=True,
+    add_receiver_hooks=True,
+    doing_acdc_runs=False,
+)
+
+#%%
+
+num_edges = []
+test_metrics = []
 corrs = []
+
+max_subgraph_size = acdc_exp.count_no_edges()
 for i in tqdm(range(len(ap_attr_to_remove))):
     # Remove the ith least important edge
     (sender_component, receiver_component), ap_val = ap_attr_to_remove[i]
 
-    try:
-        acdc_exp.corr.edges[receiver_component.hook_point_name][receiver_component.index][sender_component.hook_point_name][sender_component.index].present=False
+    acdc_exp.corr.edges[receiver_component.hook_point_name][receiver_component.index][sender_component.hook_point_name][sender_component.index].present=False
 
-        # If the child becomes disconnected, remove it
-        child = acdc_exp.corr.graph[receiver_component.hook_point_name][receiver_component.index]
-        for parent in child.parents:
-            if acdc_exp.corr.edges[receiver_component.hook_point_name][receiver_component.index][parent.name][parent.index].present:
-                break
-        else:
-            print("Removing")
-            acdc_exp.remove_redundant_node(child)
+    # Calculate Test KL
+    cur_test_metrics = {}
+    for name, fn in things.test_metrics.items():
+        cur_test_metrics["test_"+name] = fn(acdc_exp.model(things.test_data)).item()
+    test_metrics.append(cur_test_metrics)
+    
+    print(
+        test_metrics[-1],
+    )
 
-    except Exception as e:
-        print(e)
-        print("Failed to do some things")
-
-    # For each receiver, if it has no outgoing, remove it
     corrs.append(deepcopy(acdc_exp.corr))
+
+    # If we now have something disconnected, add it to a BFS and remove everything
+    # TODO?
 
 #%%
 
@@ -294,3 +338,41 @@ fig.write_image(f"roc_remove_{RUN_NAME}.png")
 
 #%%
 
+json_fname = os.path.expanduser(f"~/Automatic-Circuit-Discovery/experiments/results/plots_data/acdc-induction-nll-False-0.json")
+
+with open(json_fname, "r") as f:
+    data = json.load(f)
+
+filtered_data = data["trained"]["random_ablation"]["induction"]["nll"]["ACDC"] # Baseline
+
+# %%
+
+fig = go.Figure()
+
+fig.add_trace(
+    go.Scatter(
+        x=filtered_data["n_edges"],
+        y=filtered_data["test_kl_div"],
+        mode="markers",
+        name="ACDC on NLL",
+    )
+)
+
+fig.add_trace(
+    go.Scatter(
+        x = list(range(len(test_metrics)-1, -1, -1)),
+        y = [x["test_kl_div"] for x in test_metrics],
+        mode="markers",
+        name="AP on NLL",
+    )
+)
+
+fig.update_layout(
+    title="Test KL Divergence vs. Number of Edges",
+    xaxis_title="Number of Edges",
+    yaxis_title="Test KL Divergence",
+)
+
+fig.show()
+
+# %%
