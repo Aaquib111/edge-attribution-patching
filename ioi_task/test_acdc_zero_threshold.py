@@ -193,9 +193,9 @@ acdcpp_exp = ACDCPPExperiment(
     model,
     clean_dataset.toks if TASK == "ioi" else test_data,
     corr_dataset.toks if TASK == "ioi" else test_patch_data, 
-    negative_ioi_metric if TASK == "ioi" else test_metrics['docstring_metric'],
-    negative_ioi_metric if TASK == "ioi" else test_metrics['docstring_metric'],
-    [threshold_dummy],
+    acdc_metric=negative_ioi_metric if TASK == "ioi" else test_metrics['docstring_metric'],
+    acdcpp_metric=negative_ioi_metric if TASK == "ioi" else abs_docstring_metric,
+    thresholds=[threshold_dummy],
     run_name=RUN_NAME,
     verbose=False,
     zero_ablation=True,
@@ -274,70 +274,6 @@ remmed_second = [x[0] for x in filtered_points]
 fig = get_roc_figure([remmed_second], ["AP"])
 # Save fig as PNG
 fig.write_image(f"roc_{RUN_NAME}.png")
-
-#%%
-
-ends = []
-just_store_ends = False
-NUM_COMPONENTS = 1000
-for idx in tqdm(range(NUM_COMPONENTS)):
-    (sender_component, receiver_component), ap_val = sorted_ap_attr[idx]
-
-#%%
-
-# Sort by scores, with least important nodes first
-nodes_names_indices.sort(key=lambda x: prune_scores[x[1]][x[2]].item(), reverse=False)
-
-# %%
-serializable_nodes_names_indices = [(list(map(str, nodes)), name, repr(idx), prune_scores[name][idx].item()) for nodes, name, idx in nodes_names_indices]
-wandb.log({"nodes_names_indices": serializable_nodes_names_indices})
-
-# %%
-
-def test_metrics(logits, score):
-    d = {"test_"+k: fn(logits).mean().item() for k, fn in things.test_metrics.items()}
-    d["score"] = score
-    return d
-
-# Log metrics without ablating anything
-logits = do_random_resample_caching(model, things.test_data)
-wandb.log(test_metrics(logits, math.inf))
-
-# %%
-
-do_random_resample_caching(model, things.test_patch_data)
-if args.zero_ablation:
-    do_zero_caching(model)
-
-nodes_to_mask = []
-corr, head_parents = None, None
-for nodes, hook_name, idx in tqdm.tqdm(nodes_names_indices):
-    nodes_to_mask += nodes
-    corr, head_parents = iterative_correspondence_from_mask(model, nodes_to_mask, use_pos_embed=False, newv=False, corr=corr, head_parents=head_parents)
-    for e in corr.all_edges().values():
-        e.effect_size = 1.0
-
-    score = prune_scores[hook_name][idx].item()
-
-    # Delete this module
-    done = False
-    for n, c in model.named_modules():
-        if n == hook_name:
-            assert not done, f"Found {hook_name}[{idx}]twice"
-            with torch.no_grad():
-                c.mask_scores[idx] = 0
-            done = True
-    assert done, f"Could not find {hook_name}[{idx}]"
-
-    to_log_dict = test_metrics(model(things.test_data), score)
-    to_log_dict["number_of_edges"] = corr.count_no_edges()
-
-    print(to_log_dict)
-    wandb.log(to_log_dict)
-
-# %%
-
-wandb.finish()
 
 #%%
 
