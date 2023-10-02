@@ -268,7 +268,9 @@ def acdc_nodes(model: HookedTransformer,
                         continue
                     if upstream_layer == downstream_layer and (parent.hook_point_name.endswith("mlp_out") or downstream_component.hook_point_name.endswith(("q_input", "k_input", "v_input"))):
                         # Other cases where upstream is actually after downstream!
-                        continue
+                        if upstream_layer != 0 or parent.hook_point_name.startswith(("hook_result", "mlp_out")):
+                            # Make sure to not continue on the hook_resid_pre cases
+                            continue
 
                 fwd_cache_hook_name = parent.hook_point_name if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.hook_point_name
                 fwd_cache_index = parent.index if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.index
