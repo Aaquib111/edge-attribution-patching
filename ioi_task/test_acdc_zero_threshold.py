@@ -338,41 +338,40 @@ fig.write_image(f"roc_remove_{RUN_NAME}.png")
 
 #%%
 
-json_fname = os.path.expanduser(f"~/Automatic-Circuit-Discovery/experiments/results/plots_data/acdc-induction-nll-False-0.json")
-
+json_metric_name = "kl_div" # TODO: Change this to whatever metric we want to plot
+method_name = "16h"
+json_fname = os.path.expanduser(f"~/Automatic-Circuit-Discovery/experiments/results/plots_data/{method_name}-induction-{json_metric_name}-False-0.json")
 with open(json_fname, "r") as f:
     data = json.load(f)
 
-filtered_data = data["trained"]["random_ablation"]["induction"]["nll"]["ACDC"] # Baseline
+filtered_data = data["trained"]["random_ablation"]["induction"][json_metric_name][method_name.upper()] # Baseline
 
 # %%
 
-fig = go.Figure()
+metric_name = "nll"
 
+fig = go.Figure()
 fig.add_trace(
     go.Scatter(
         x=filtered_data["n_edges"],
-        y=filtered_data["test_kl_div"],
+        y=filtered_data[f"test_{metric_name}"],
         mode="markers",
-        name="ACDC on NLL",
+        name="ACDC on NLL", # Rename from NLL when we use different files
     )
 )
-
 fig.add_trace(
     go.Scatter(
         x = list(range(len(test_metrics)-1, -1, -1)),
-        y = [x["test_kl_div"] for x in test_metrics],
+        y = [x[f"test_{metric_name}"] for x in test_metrics],
         mode="markers",
         name="AP on NLL",
     )
 )
-
 fig.update_layout(
-    title="Test KL Divergence vs. Number of Edges",
+    title=f"Test {metric_name} vs. Number of Edges",
     xaxis_title="Number of Edges",
-    yaxis_title="Test KL Divergence",
+    yaxis_title=f"Test {metric_name}",
 )
-
 fig.show()
 
 # %%
