@@ -18,7 +18,6 @@ from utils.graphics_utils import get_node_name
 from typing import NamedTuple
 
 ModelComponentTuple = NamedTuple("ModelComponent", [("hook_point_name", str), ("index", TorchIndex), ("incoming_edge_type", str)]) # Abstraction for a node in the computational graph. TODO: move this into ACDC repo when standardised. TODO make incoming_edge_type an enum that's hashable
-
 # Wrapper for the tuple, defines a hashing function
 class ModelComponent(ModelComponentTuple):
     def replace_parens(self, tup):
@@ -123,6 +122,7 @@ def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["nod
     clean_cache = {}
 
     def forward_cache_hook(act, hook):
+        #print(f'Clean cached {hook.name}')
         clean_cache[hook.name] = act.detach()
 
     edge_acdcpp_outgoing_filter = lambda name: name.endswith(("hook_result", "hook_mlp_out", "blocks.0.hook_resid_pre", "hook_q", "hook_k", "hook_v"))
@@ -131,13 +131,14 @@ def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["nod
     clean_grad_cache = {}
 
     def backward_cache_hook(act, hook):
+        #print(f'Grad cached {hook.name}')
         clean_grad_cache[hook.name] = act.detach()
 
     incoming_ends = ["hook_q_input", "hook_k_input", "hook_v_input", f"blocks.{model.cfg.n_layers-1}.hook_resid_post"]
     if not model.cfg.attn_only:
         incoming_ends.append("hook_mlp_in")
-    edge_acdcpp_back_filter = lambda name: name.endswith(tuple(incoming_ends + ["hook_q", "hook_k", "hook_v"]))
-    model.add_hook(hook_filter if mode=="node" else edge_acdcpp_back_filter, backward_cache_hook, "bwd")
+    edge_acdcpp_back_filter = lambda name: name.endswith(tuple(incoming_ends + ["hook_q", "hook_k", "hook_v", "hook_result", "hook_mlp_out", "hook_resid_pre"]))
+    model.add_hook(hook_filter if mode=="node" else edge_acdcpp_back_filter, backward_cache_hook, "bwd") #edge_acdcpp_back_filter
     value = metric(model(clean_input))
 
 
@@ -148,6 +149,7 @@ def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["nod
     corrupted_cache = {}
 
     def forward_corrupted_cache_hook(act, hook):
+        #print(f'Corr cached {hook.name}')
         corrupted_cache[hook.name] = act.detach()
 
     model.add_hook(hook_filter if mode == "node" else edge_acdcpp_outgoing_filter, forward_corrupted_cache_hook, "fwd")
@@ -198,7 +200,7 @@ def get_relevant_edges(exp):
     relevant_nodes: List = [
         node 
         for node in exp.corr.nodes() 
-        if node.incoming_edge_type in [EdgeType.ADDITION, EdgeType.DIRECT_COMPUTATION]
+        #if node.incoming_edge_type in [EdgeType.ADDITION, EdgeType.DIRECT_COMPUTATION]
     ]
 
     components = {} 
@@ -212,15 +214,6 @@ def get_relevant_edges(exp):
             ) 
             for node in relevant_node.parents
         ])
-        if relevant_node.name in ['blocks.0.hook_q_input', 'blocks.0.hook_k_input' 'blocks.0.hook_v_input']:
-            for p in parents:
-                new_p = ModelComponent(
-                    hook_point_name=p.hook_point_name,
-                    index=p.index,
-                    incoming_edge_type=str(EdgeType.ADDITION)
-                )
-                parents.remove(p)
-                parents.add(new_p)
                 
         downstream_component = ModelComponent(
             hook_point_name=relevant_node.name, 
@@ -229,22 +222,13 @@ def get_relevant_edges(exp):
         )
         relevant_parents = []
         for parent in parents:
-            if "." in parent.hook_point_name and "." in downstream_component.hook_point_name: 
-                # hook_embed and hook_pos_embed have no . but should always be connected anyway
-                upstream_layer = int(parent.hook_point_name.split(".")[1])
-                downstream_layer = int(downstream_component.hook_point_name.split(".")[1])
-                if upstream_layer > downstream_layer:
-                    continue
-                if upstream_layer == downstream_layer and (parent.hook_point_name.endswith("mlp_out") or 
-                        downstream_component.hook_point_name.endswith(("q_input", "k_input", "v_input"))):
-                    # Other cases where upstream is actually after downstream!
-                    continue
-                relevant_parents.append(parent)
+            relevant_parents.append(parent)
         components[downstream_component] = relevant_parents
         
     return components
 
 def parse_relevant_edges(exp):
+    
     # TODO: Find better way to do this whole method
     relevant_edges = get_relevant_edges(exp)
     parsed_edges = set()
@@ -253,14 +237,14 @@ def parse_relevant_edges(exp):
             edge_tuple = (downstream_component.hook_point_name, downstream_component.index, parent.hook_point_name, parent.index)
             try:
                 edge = exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]]
+                if edge.present:
+                    # If we get here, the edge has not been pruned and does exist
+                    str_downstream_idx = downstream_component.replace_parens(downstream_component.index)
+                    str_parent_idx = parent.replace_parens(parent.index)
+                    edge_name = f'{edge_tuple[0]}{str_downstream_idx}{edge_tuple[2]}{str_parent_idx}'
+                    parsed_edges.add(edge_name)
             except KeyError:
-                # If we get a KeyError, the edge has been pruned 
                 continue
-            if edge.present:
-                # If we get here, the edge has not been pruned and does exist
-                str_downstream_idx = downstream_component.replace_parens(downstream_component.index)
-                str_parent_idx = parent.replace_parens(parent.index)
-                parsed_edges.add(f'{edge_tuple[0]}{str_downstream_idx}{edge_tuple[2]}{str_parent_idx}')
 
     return parsed_edges
 
@@ -336,7 +320,6 @@ def acdc_nodes(model: HookedTransformer,
     
     elif mode == "edge":
         relevant_edges = get_relevant_edges(exp)
-        
         results: Dict[Tuple[ModelComponent, ModelComponent], float] = {} # We use a list of floats as we may be splitting by position
         
         for downstream_component in tqdm(relevant_edges.keys(), desc="Edge pruning"): 
@@ -354,12 +337,19 @@ def acdc_nodes(model: HookedTransformer,
                     if downstream_component.incoming_edge_type == str(EdgeType.ADDITION)
                     else downstream_component.index
                 )
-                current_result = (
-                    clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * 
-                    (clean_cache[fwd_cache_hook_name][fwd_cache_index.as_index] - 
-                    corrupted_cache[fwd_cache_hook_name][fwd_cache_index.as_index])
-                ).sum().cpu()
-                
+                try:
+                    current_result = (
+                        clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * 
+                        (clean_cache[fwd_cache_hook_name][fwd_cache_index.as_index] - 
+                        corrupted_cache[fwd_cache_hook_name][fwd_cache_index.as_index])
+                    ).sum().cpu()
+                except KeyError:
+                    # WE SHOULD NEVER HIT THIS POINT
+                    str_downstream_idx = downstream_component.replace_parens(downstream_component.index)
+                    str_parent_idx = parent.replace_parens(parent.index)
+                    edge_name = f'{downstream_component.hook_point_name}{str_downstream_idx}{parent.hook_point_name}{str_parent_idx}'
+                    print(f'Couldnt find {edge_name}')
+                    continue
                 results[f'{downstream_component.hook_point_name}{downstream_component.replace_parens(downstream_component.index)}{parent.hook_point_name}{parent.replace_parens(parent.index)}'] = current_result.item()
                 if attr_absolute_val: 
                     current_result = current_result.abs()
