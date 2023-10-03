@@ -31,7 +31,7 @@ from acdc.TLACDCExperiment import TLACDCExperiment
 
 device = t.device("cuda" if t.cuda.is_available() else "CPU")
 print(device)
-TASK: Literal["docstring", "ioi"] = "docstring"
+TASK: Literal["docstring", "ioi"] = "ioi"
 
 #%%
 
@@ -150,14 +150,14 @@ acdcpp_exp = ACDCPPExperiment(
     [threshold_dummy],
     run_name=RUN_NAME,
     verbose=False,
-    zero_ablation=True,
+    zero_ablation=False,
     attr_absolute_val=False,
     save_graphs_after=0,
     pruning_mode="edge",
     no_pruned_nodes_attr=1
 )
 acdc_exp = acdcpp_exp.setup_exp(threshold=threshold_dummy)
-do_mean_ablation = True
+do_mean_ablation = False
 if do_mean_ablation:
     corrupted_cache_keys = list(acdc_exp.global_cache.corrupted_cache.keys())
     for key in corrupted_cache_keys:
@@ -172,11 +172,11 @@ sorted_ap_attr = sorted(attr_results.items(), key=lambda x: abs(x[1]), reverse=T
 
 ends = []
 just_store_ends = False
-NUM_COMPONENTS = 1000
+NUM_COMPONENTS = 10
 for idx in tqdm(range(NUM_COMPONENTS)):
     (sender_component, receiver_component), ap_val = sorted_ap_attr[idx]
 
-    if "blocks.0.hook_resid_pre" != sender_component.hook_point_name or "blocks.3.hook_k_input" not in receiver_component.hook_point_name: continue
+    # if "blocks.0.hook_resid_pre" != sender_component.hook_point_name or "blocks.3.hook_k_input" not in receiver_component.hook_point_name: continue
 
     print(
         f"Sender component: {sender_component}, receiver component: {receiver_component}, ap_val: {ap_val}"
@@ -207,6 +207,8 @@ for idx in tqdm(range(NUM_COMPONENTS)):
     edge.mask = 0.0
     new_metric = acdc_exp.cur_metric
 
+    rev_sign=ap_val>0
+
     print(
         f"Original metric: {original_metric:.10f}, new metric: {new_metric:.10f}"
     )
@@ -219,17 +221,24 @@ for idx in tqdm(range(NUM_COMPONENTS)):
         edge.mask = interpolation
         acdc_exp.update_cur_metric()
         intermediate_metric = acdc_exp.cur_metric
-        interpolated_metrics.append(intermediate_metric)
+        interpolated_metrics.append(intermediate_metric - original_metric)
     edge.mask = 0.0
 
     # Plot the interpolated metrics
     # Clear fig for next iteration
     plt.clf()
+
     plt.figure(figsize=(10, 6))  # Adjust the dimensions as necessary
-    plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), interpolated_metrics)
-    plt.xlabel('Interpolation')
-    plt.ylabel('Metric')
-    plt.title('Interpolated metric')
+    # Approximate the tangent line at x=0 and extrapolate to x=1
+    slope_at_zero = (interpolated_metrics[1] - interpolated_metrics[0]) * (len(interpolated_metrics)-1)  # Assuming a step size of 0.01
+    tangent_line = slope_at_zero * torch.linspace(0, 1, len(interpolated_metrics)) + interpolated_metrics[0]
+    plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), tangent_line * (-1.0 if rev_sign else 1.0), linestyle='--')
+    plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), torch.tensor(interpolated_metrics) * (-1.0 if rev_sign else 1.0))
+    plt.plot(1.0, -ap_val * (-1.0 if rev_sign else 1.0), marker='o', color='blue') # Kind of annoying property that it seems be negative?
+    plt.xlabel('Interpolation towards corruption')
+    plt.ylabel('Absolute attribution score')
+    plt.title(f'Corrupting edge {sender_node_name}{sender_node_index} -> {receiver_node_name}{receiver_node_index} (AP value: {-ap_val:.10f})')
+    fname = os.path.expanduser(f"~/acdcpp/ioi_task/edge_{idx}.pdf")
 
     # Label the x=0 point as "Clean edge"
 
@@ -243,25 +252,36 @@ for idx in tqdm(range(NUM_COMPONENTS)):
 
     plt.annotate(
         'Corrupted edge',
-        xy=(1.0, interpolated_metrics[-1]),
-        xytext=(0.5, interpolated_metrics[-1]+0.05),
+        xy=(1.0,  (-1.0 if rev_sign else 1.0)* interpolated_metrics[-1]+0.05),
+        xytext=(0.5, (-1.0 if rev_sign else 1.0) * interpolated_metrics[-1]+0.05),
         # Skinnier arrow and tip
         arrowprops=dict(facecolor='black', shrink=0.05, width=0.5, headwidth=7),    
     )
 
-    # Approximate the tangent line at x=0 and extrapolate to x=1
-    slope_at_zero = (interpolated_metrics[1] - interpolated_metrics[0]) * (len(interpolated_metrics)-1)  # Assuming a step size of 0.01
-    tangent_line = slope_at_zero * torch.linspace(0, 1, len(interpolated_metrics)) + interpolated_metrics[0]
-    plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), tangent_line, linestyle='--')
-    plt.plot(1.0, interpolated_metrics[0] - ap_val, marker='o', color='red') # Kind of annoying property that it seems be negative?
-    plt.xlabel('Interpolation towards corruption')
-    plt.ylabel('Metric')
-    plt.title(f'Corrupting edge {sender_node_name}{sender_node_index} -> {receiver_node_name}{receiver_node_index} (AP value: {-ap_val:.10f})')
-    fname = os.path.expanduser(f"~/acdcpp/ioi_task/edge_{idx}.png")
+    # Add Legend with big font
+    plt.legend(
+        ['EAP linear approximation', 'Interpolated activation patching', 'EAP value'],
+        fontsize='x-large',
+    )
 
-    # Save the figure with a widened layout
-    plt.tight_layout()
-    plt.savefig(fname)
+    # Show legenf top left
+
+    # plt.legend(
+    #     ['Tangent line at clean edge', 'Interpolated metrics', 'AP value'],
+    #     fontsize='x-large',
+    #     loc='upper left',
+    # )
+
+    # Make font bigger
+
+    plt.tick_params(axis='both', which='major', labelsize=14)
+
+    # make x and y axis biger
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+
+    # Save the figure as PDF
+    plt.savefig(fname, bbox_inches='tight')
     plt.show()
 
 # %%
