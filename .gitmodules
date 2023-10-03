@@ -1,3 +1,4 @@
 [submodule "Automatic-Circuit-Discovery"]
 	path = Automatic-Circuit-Discovery
 	url = https://github.com/Aaquib111/Automatic-Circuit-Discovery.git
+	branch = main

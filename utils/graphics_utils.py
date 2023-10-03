@@ -1,4 +1,5 @@
 import sys
+import re
 sys.path.append('Automatic-Circuit-Discovery/')
 
 from acdc.TLACDCInterpNode import TLACDCInterpNode
@@ -102,7 +103,7 @@ def get_edge_props(edge_name, edge_to_attr):
     else:
         edge_color = '#2ca02c'
 
-    edge_width = abs(edge_to_attr[edge_name])
+    edge_width = abs(edge_to_attr[edge_name]) * 3
     
     return edge_width, edge_color
 
@@ -120,8 +121,19 @@ def show(
     show_placeholders: bool = False,
     seed: Optional[int] = None
 ):
-    g = pgv.AGraph(directed=True, bgcolor="transparent", overlap="false", splines="true", layout=layout)
-
+    g = pgv.AGraph(name='root',
+                   strict=True,
+                   directed=True, 
+                   #size="7.75,10.25"
+                   #splines='false'
+#                    bgcolor="transparent", 
+#                    overlap="false", 
+#                    splines="true", 
+#                    layout=layout, 
+                   )
+    g.graph_attr.update(ranksep='0.1', nodesep='0.1', compound=True)
+    g.node_attr.update(fixedsize='true', width='1.5', height='.5')
+    
     if seed is not None:
         np.random.seed(seed)
     
@@ -147,6 +159,28 @@ def show(
             g_pos.read(fpath)
             for node in g_pos.nodes():
                 node_pos[node.name] = node.attr["pos"]
+    
+    # One subgraph per layer, so all nodes in same layer are in one line
+    prev_layer = -1
+    max_layer = -1
+    find_layer_edge = re.compile('blocks.([0-9]+)')
+    find_layer_node = re.compile('([0-9]+)')
+    layer_to_subgraph = {}
+    layer_to_subgraph[-1] = g.add_subgraph(name=f'cluster_-1', rank='same', color='invis')
+    layer_to_subgraph[-1].add_node(f'-1_invis', style='invis')
+    
+    for child_hook_name in correspondence.edges:
+        curr_layer = int(find_layer_edge.search(child_hook_name).group(1))
+        max_layer = max(max_layer, curr_layer)
+        if curr_layer != prev_layer:
+            prev_layer = curr_layer
+            layer_to_subgraph[curr_layer] = g.add_subgraph(name=f'cluster_{curr_layer}', rank='same', color='invis')
+            layer_to_subgraph[curr_layer].add_node(f'{curr_layer}_invis', style='invis')
+            g.add_edge(f'{curr_layer - 1}_invis', f'{curr_layer}_invis', style='invis', weight=1000)
+            
+    layer_to_subgraph[max_layer + 1] = g.add_subgraph(name=f'cluster_{max_layer + 1}', rank='same', color='invis')  
+    layer_to_subgraph[max_layer + 1].add_node(f'{max_layer + 1}_invis', style='invis')
+    g.add_edge(f'{max_layer}_invis', f'{max_layer + 1}_invis', style='invis', weight=1000)
     
     for child_hook_name in correspondence.edges:
         for child_index in correspondence.edges[child_hook_name]:
@@ -176,14 +210,21 @@ def show(
                             maybe_pos = {}
                             if node_name in node_pos:
                                 maybe_pos["pos"] = node_pos[node_name]
-                            g.add_node(
+                            if node_name == '<resid_post>':
+                                node_layer = max_layer + 1
+                            elif node_name == 'embed':
+                                node_layer = -1
+                            else:
+                                node_layer = int(find_layer_node.search(node_name).group(1))
+                                
+                            layer_to_subgraph[node_layer].add_node(
                                 node_name,
                                 fillcolor=get_node_color(node_name),
                                 color="black",
                                 style="filled, rounded",
                                 shape="box",
                                 fontname="Helvetica",
-                                **maybe_pos,
+                                #**maybe_pos,
                             )
                         
                         if not edge_to_attr or not edge_name in edge_to_attr:
@@ -197,6 +238,9 @@ def show(
                             child_name,
                             penwidth=edge_width,
                             color=edge_color,
+                            weight=10,
+                            minlen='0.5',
+                            #len=1,
                         )
     if fname is not None:
         base_fname = ".".join(str(fname).split(".")[:-1])
@@ -219,6 +263,6 @@ def show(
         g.write(path=base_fname + ".gv")
 
         if not fname.endswith(".gv"): # turn the .gv file into a .png file
-            g.draw(path=fname, prog="dot")
+            g.draw(path=fname, prog='dot')
 
     return g

@@ -89,12 +89,6 @@ class ACDCPPExperiment():
             verbose=self.verbose,
             **self.acdc_args
         )
-        exp.model.reset_hooks()
-        exp.setup_model_hooks(
-            add_sender_hooks=True,
-            add_receiver_hooks=True,
-            doing_acdc_runs=False
-        )
 
         return exp
     
@@ -153,16 +147,16 @@ class ACDCPPExperiment():
                 if self.pruning_mode == 'edge':
                     edges_after_acdcpp[threshold] = parse_relevant_edges(exp)
                     if threshold >= self.save_graphs_after:
-                        show(exp.corr, edge_to_attr=acdcpp_attrs, fname=f'ims/{self.run_name}/thresh{threshold}_before_acdc.png')
+                        show(exp.corr, edge_to_attr=acdcpp_attrs, fname=f'ims/{self.run_name}/thresh{threshold}_before_acdc.pdf')
                 else:
                     if threshold >= self.save_graphs_after:
-                        show(exp.corr, acdcpp_attrs, fname=f'ims/{self.run_name}/thresh{threshold}_before_acdc.png')
+                        show(exp.corr, acdcpp_attrs, fname=f'ims/{self.run_name}/thresh{threshold}_before_acdc.pdf')
             
             if self.do_run_acdc:
                 acdc_heads, passes, acdc_attrs = self.run_acdc(exp)
                 if threshold >= self.save_graphs_after:
                     print('Saving ACDC Graph')
-                    show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_after_acdc.png')
+                    show(exp.corr, fname=f'ims/{self.run_name}/thresh{threshold}_after_acdc.pdf')
 
                 if self.pruning_mode == 'edge':
                     edges_after_acdc[threshold] = parse_relevant_edges(exp)
