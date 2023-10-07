@@ -207,7 +207,7 @@ for idx in tqdm(range(NUM_COMPONENTS)):
     edge.mask = 0.0
     new_metric = acdc_exp.cur_metric
 
-    rev_sign=ap_val>0
+    rev_sign=False #ap_val>0
 
     print(
         f"Original metric: {original_metric:.10f}, new metric: {new_metric:.10f}"
@@ -221,7 +221,7 @@ for idx in tqdm(range(NUM_COMPONENTS)):
         edge.mask = interpolation
         acdc_exp.update_cur_metric()
         intermediate_metric = acdc_exp.cur_metric
-        interpolated_metrics.append(intermediate_metric - original_metric)
+        interpolated_metrics.append(original_metric-intermediate_metric) # SO we are correct Logit Diff way round
     edge.mask = 0.0
 
     # Plot the interpolated metrics
@@ -234,9 +234,9 @@ for idx in tqdm(range(NUM_COMPONENTS)):
     tangent_line = slope_at_zero * torch.linspace(0, 1, len(interpolated_metrics)) + interpolated_metrics[0]
     plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), tangent_line * (-1.0 if rev_sign else 1.0), linestyle='--')
     plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), torch.tensor(interpolated_metrics) * (-1.0 if rev_sign else 1.0))
-    plt.plot(1.0, -ap_val * (-1.0 if rev_sign else 1.0), marker='o', color='blue') # Kind of annoying property that it seems be negative?
+    plt.plot(1.0, ap_val, marker='o', color='blue') # Kind of annoying property that it seems be negative?
     plt.xlabel('Interpolation towards corruption', fontsize=25)
-    plt.ylabel('Absolute attribution score', fontsize=25)
+    plt.ylabel('Change in Docstring Logit Diff', fontsize=25)
     plt.title(f'Corrupting edge {sender_node_name}{sender_node_index} -> {receiver_node_name}{receiver_node_index} (AP value: {-ap_val:.10f})')
     fname = os.path.expanduser(f"~/acdcpp/ioi_task/edge_{idx}.pdf")
 
@@ -248,6 +248,7 @@ for idx in tqdm(range(NUM_COMPONENTS)):
         xytext=(0.2, interpolated_metrics[0]+0.05),
         # Skinnier arrow and tip
         arrowprops=dict(facecolor='black', shrink=0.05, width=0.5, headwidth=7),
+        fontsize=17,
     )
 
     plt.annotate(
@@ -255,13 +256,14 @@ for idx in tqdm(range(NUM_COMPONENTS)):
         xy=(1.0,  (-1.0 if rev_sign else 1.0)* interpolated_metrics[-1]+0.05),
         xytext=(0.5, (-1.0 if rev_sign else 1.0) * interpolated_metrics[-1]+0.05),
         # Skinnier arrow and tip
-        arrowprops=dict(facecolor='black', shrink=0.05, width=0.5, headwidth=7),    
+        arrowprops=dict(facecolor='black', shrink=0.05, width=0.5, headwidth=7), 
+        fontsize=17,   
     )
 
     # Add Legend with big font
     plt.legend(
         ['EAP linear approximation', 'Interpolated activation patching', 'EAP value'],
-        fontsize='x-large',
+        fontsize=17,
     )
 
     # Show legenf top left
