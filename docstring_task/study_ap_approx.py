@@ -238,7 +238,7 @@ for idx in tqdm(range(NUM_COMPONENTS)):
     plt.xlabel('Interpolation towards corruption', fontsize=25)
     plt.ylabel('Change in Docstring Logit Diff', fontsize=25)
     # plt.title(f'Corrupting edge {sender_node_name}{sender_node_index} -> {receiver_node_name}{receiver_node_index} (AP value: {-ap_val:.10f})')
-    plt.title(f"Input to L{receiver_node_name.split('.')[1]}H{receiver_node_index.hashable_tuple[-1]}{receiver_node_name[-1].upper()}", fontsize=20)
+    plt.title(f"Input to L{receiver_node_name.split('.')[1]}H{receiver_node_index.hashable_tuple[-1]}{receiver_node_name.split('_')[-2].upper()}", fontsize=20)
     fname = os.path.expanduser(f"~/acdcpp/ioi_task/edge_{idx}.pdf")
 
     # Label the x=0 point as "Clean edge"
