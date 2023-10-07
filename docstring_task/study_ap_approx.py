@@ -31,7 +31,7 @@ from acdc.TLACDCExperiment import TLACDCExperiment
 
 device = t.device("cuda" if t.cuda.is_available() else "CPU")
 print(device)
-TASK: Literal["docstring", "ioi"] = "ioi"
+TASK: Literal["docstring", "ioi"] = "docstring"
 
 #%%
 
@@ -235,8 +235,8 @@ for idx in tqdm(range(NUM_COMPONENTS)):
     plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), tangent_line * (-1.0 if rev_sign else 1.0), linestyle='--')
     plt.plot(torch.linspace(0, 1, len(interpolated_metrics)), torch.tensor(interpolated_metrics) * (-1.0 if rev_sign else 1.0))
     plt.plot(1.0, -ap_val * (-1.0 if rev_sign else 1.0), marker='o', color='blue') # Kind of annoying property that it seems be negative?
-    plt.xlabel('Interpolation towards corruption')
-    plt.ylabel('Absolute attribution score')
+    plt.xlabel('Interpolation towards corruption', fontsize=25)
+    plt.ylabel('Absolute attribution score', fontsize=25)
     plt.title(f'Corrupting edge {sender_node_name}{sender_node_index} -> {receiver_node_name}{receiver_node_index} (AP value: {-ap_val:.10f})')
     fname = os.path.expanduser(f"~/acdcpp/ioi_task/edge_{idx}.pdf")
 
@@ -276,7 +276,7 @@ for idx in tqdm(range(NUM_COMPONENTS)):
 
     plt.tick_params(axis='both', which='major', labelsize=14)
 
-    # make x and y axis biger
+    # make x and y axis bigger
     plt.xticks(fontsize=14)
     plt.yticks(fontsize=14)
 
