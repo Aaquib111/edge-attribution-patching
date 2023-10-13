@@ -17,5 +17,5 @@ git submodule init
 git submodule update
 git pull origin master
 
-pip install git+https://github.com:ArthurConmy/TransformerLens@arthur-fix-tokenizer plotly pygraphviz
+pip install git+https://github.com/ArthurConmy/TransformerLens@arthur-fix-tokenizer plotly pygraphviz
 pip install -r requirements.txt
