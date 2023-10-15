@@ -195,6 +195,7 @@ def get_relevant_edges(exp):
         Returns Dict[ModelComponent, List[ModelComponent]], 
         where the first key is a downstream component and value
         is a list of parents pointing to the downstream component
+        and removes PLACEHOLDER edges
     '''
     # Setup the upstream components
     relevant_nodes: List = [
@@ -213,7 +214,7 @@ def get_relevant_edges(exp):
                 incoming_edge_type=str(node.incoming_edge_type)
             ) 
             for node in relevant_node.parents
-        ])
+        ]) if str(relevant_node.incoming_edge_type) != str(EdgeType.PLACEHOLDER) else set() 
                 
         downstream_component = ModelComponent(
             hook_point_name=relevant_node.name, 
