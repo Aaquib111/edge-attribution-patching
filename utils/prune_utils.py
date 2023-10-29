@@ -105,7 +105,24 @@ def split_layers_and_heads(act: Tensor, model: HookedTransformer) -> Tensor:
 
 hook_filter = lambda name: name.endswith("ln1.hook_normalized") or name.endswith("attn.hook_result")
 
-def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["node", "edge"]="node"):
+def get_3_caches(model,
+    clean_input,
+    corrupted_input,
+    metric,
+    mode: Literal["node", "edge"] = "node",
+    upstream_hook_names: Optional[Tuple] = None,
+    downstream_hook_names: Optional[Tuple] = None,
+    ):
+
+    # default hook names
+    if not upstream_hook_names:
+        upstream_hook_names = ("hook_result", "hook_mlp_out", "blocks.0.hook_resid_pre", "hook_q", "hook_k", "hook_v")
+    if not downstream_hook_names:
+        if not model.cfg.attn_only:   
+            downstream_hook_names = ("hook_mlp_in", "hook_q_input", "hook_k_input", "hook_v_input", f"blocks.{model.cfg.n_layers-1}.hook_resid_post")
+        else:
+            downstream_hook_names = ("hook_q_input", "hook_k_input", "hook_v_input", f"blocks.{model.cfg.n_layers-1}.hook_resid_post")
+        
     # cache the activations and gradients of the clean inputs
     model.reset_hooks()
     clean_cache = {}
@@ -113,22 +130,17 @@ def get_3_caches(model, clean_input, corrupted_input, metric, mode: Literal["nod
     def forward_cache_hook(act, hook):
         clean_cache[hook.name] = act.detach()
 
-    edge_acdcpp_outgoing_filter = lambda name: name.endswith(("hook_result", "hook_mlp_out", "blocks.0.hook_resid_pre", "hook_q", "hook_k", "hook_v"))
+    edge_acdcpp_outgoing_filter = lambda name: name.endswith(upstream_hook_names)
     model.add_hook(hook_filter if mode == "node" else edge_acdcpp_outgoing_filter, forward_cache_hook, "fwd")
 
     clean_grad_cache = {}
 
     def backward_cache_hook(act, hook):
-        clean_grad_cache[hook.name] = act.detach()
+        clean_grad_cache[hook.name] = act.detach()   
 
-    incoming_ends = ["hook_q_input", "hook_k_input", "hook_v_input", f"blocks.{model.cfg.n_layers-1}.hook_resid_post"]
-    if not model.cfg.attn_only:
-        incoming_ends.append("hook_mlp_in")
-    edge_acdcpp_back_filter = lambda name: name.endswith(tuple(incoming_ends + ["hook_q", "hook_k", "hook_v"]))
+    edge_acdcpp_back_filter = lambda name: name.endswith(downstream_hook_names)
     model.add_hook(hook_filter if mode=="node" else edge_acdcpp_back_filter, backward_cache_hook, "bwd")
     value = metric(model(clean_input))
-
-
     value.backward()
 
     # cache the activations of the corrupted inputs
