@@ -54,16 +54,7 @@ print(f"next token: {next_token_str}")
 # Downstream nodes in {Attn_heads ("input") , MLPs ("mlp_in"), resid_final ("blocks.11.hook_resid_post")}
 # Necessary Transformerlens flags: model.set_use_hook_mlp_in(True), model.set_use_split_qkv_input(True), model.set_use_attn_result(True)
 upstream_hook_names = ("blocks.0.hook_resid_pre", "hook_result", "hook_mlp_out")
-downstream_hook_names = ("hook_q", "hook_k", "hook_v", "hook_q_input","hook_k_input", "hook_v_input", "hook_mlp_in", "blocks.11.hook_resid_post")
-
-
-
-
-
-
-
-
-
+downstream_hook_names = ("hook_q_input","hook_k_input", "hook_v_input", "hook_mlp_in", "blocks.11.hook_resid_post")
 
 # %% Get the required caches for calculating EAP scores
 # (2 forward passes on clean and corr ds, backward pass on clean ds)
@@ -77,11 +68,6 @@ clean_cache, corrupted_cache, clean_grad_cache = get_3_caches(
     upstream_hook_names=upstream_hook_names,
     downstream_hook_names=downstream_hook_names
 )
-#%% Get idx
-clean_cache
-
-
-
 
 # %% Compute matrix holding all attribution scores
 # edge_attribution_score = (upstream_corr - upstream_clean) * downstream_grad_clean
@@ -118,7 +104,7 @@ downstream_grad_cache_clean = t.zeros((
     model.cfg.n_heads * 3, # q, k, v separate
     BATCH_SIZE,
     SEQUENCE_LENGTH,
-    model.cfg.d_head
+    model.cfg.d_model
 ))
 
 downstream_idx = []
@@ -132,23 +118,24 @@ for name in clean_grad_cache:
         k_act = einops.rearrange(clean_grad_cache[k_name], "b s nh dm -> nh b s dm")
         v_act = einops.rearrange(clean_grad_cache[v_name], "b s nh dm -> nh b s dm")
         qkv_stack = t.vstack((q_act, k_act, v_act))
-        print(f"{qkv_stack.shape=}")
         downstream_grad_cache_clean[stage_cnt] = qkv_stack
+        downstream_idx.append(name[:-7] + "qkv_input")
     elif name.endswith(("hook_k_input", "hook_v_input")):
         continue
     else:
         downstream_grad_cache_clean[stage_cnt] = clean_grad_cache[name]
-
-    downstream_idx.append(name)
+        downstream_idx.append(name)
     stage_cnt += 1
-    if stage_cnt == 5:
-        break
 
+# Calculate the cartesian product of stage, node for upstream and downstream
+eap = einops.einsum(
+    upstream_diff, 
+    downstream_grad_cache_clean,
+    "up_stages up_nodes batch seq d_model, down_stages down_nodes batch seq d_model -> up_stages up_nodes down_stages down_nodes"
+)
+eap.shape
 
+# TODO Check broadcasted stuff, maybe extra dimension for q,k,v in downstream nodes?
+# TODO Make explicit only upstream -> downstream (not downstream -> upstream is important)
 
-#  Make explicit only upstream -> downstream (not downstream -> upstream is important)
-# %%
-clean_grad_cache.keys()
-# %%
-clean_grad_cache['blocks.0.attn.hook_q'].shape
 # %%

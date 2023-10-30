@@ -118,11 +118,11 @@ def get_3_caches(model,
     if not upstream_hook_names:
         upstream_hook_names = ("hook_result", "hook_mlp_out", "blocks.0.hook_resid_pre", "hook_q", "hook_k", "hook_v")
     if not downstream_hook_names:
-        if not model.cfg.attn_only:   
-            downstream_hook_names = ("hook_mlp_in", "hook_q_input", "hook_k_input", "hook_v_input", f"blocks.{model.cfg.n_layers-1}.hook_resid_post")
-        else:
+        if model.cfg.attn_only:   
             downstream_hook_names = ("hook_q_input", "hook_k_input", "hook_v_input", f"blocks.{model.cfg.n_layers-1}.hook_resid_post")
-        
+        else:
+            downstream_hook_names = ("hook_mlp_in", "hook_q_input", "hook_k_input", "hook_v_input", f"blocks.{model.cfg.n_layers-1}.hook_resid_post")
+            
     # cache the activations and gradients of the clean inputs
     model.reset_hooks()
     clean_cache = {}
