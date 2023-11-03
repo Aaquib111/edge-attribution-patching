@@ -4,11 +4,11 @@ sys.path.append('..')
 
 import torch as t
 import einops
+import plotly.express as px
 
 from transformer_lens import HookedTransformer
 from acdc.greaterthan.utils import get_all_greaterthan_things
 from utils.prune_utils import get_3_caches
-
 
 device = t.device('cuda') if t.cuda.is_available() else t.device('cpu')
 print(f'Device: {device}')
@@ -27,7 +27,7 @@ model.set_use_split_qkv_input(True)
 model.set_use_attn_result(True)
 
 #%% Get clean and corrupting datasets and task specific metric
-BATCH_SIZE = 15
+BATCH_SIZE = 50
 things = get_all_greaterthan_things(
     num_examples=BATCH_SIZE, metric_name="greaterthan", device=device
 )
@@ -75,67 +75,116 @@ N_UPSTREAM_STAGES = len(clean_cache)
 N_DOWNSTREAM_STAGES = len(clean_grad_cache) - 2*model.cfg.n_layers # qkv
 SEQUENCE_LENGTH = clean_ds.shape[1]
 
+N_TOTAL_UPSTREAM_NODES = 1 + model.cfg.n_layers * (model.cfg.n_heads + 1)
+N_TOTAL_DOWNSTREAM_NODES = 1 + model.cfg.n_layers * (3*model.cfg.n_heads + 1)
+
 # Get (upstream_corr - upstream_clean) as matrix
+N_UPSTREAM_NODES = model.cfg.n_heads
 upstream_cache_clean = t.zeros((
-    N_UPSTREAM_STAGES, 
-    model.cfg.n_heads, 
+    N_TOTAL_UPSTREAM_NODES,
     BATCH_SIZE,
     SEQUENCE_LENGTH,
     model.cfg.d_model
 ))
 upstream_cache_corr = t.zeros_like(upstream_cache_clean)
 
-upstream_idx = []
-for stage_cnt, name in enumerate(clean_cache.keys()):
-    if name.endswith("result"):
+upstream_names = []
+upstream_levels = t.zeros(N_TOTAL_UPSTREAM_NODES)
+idx = 0
+for stage_cnt, name in enumerate(clean_cache.keys()): # stage_cnt relevant for keeping track which upstream-downstream mairs can be connected
+    if name.endswith("result"): # layer of attn heads
         act_clean = einops.rearrange(clean_cache[name], "b s nh dm -> nh b s dm")
         act_corr = einops.rearrange(corrupted_cache[name], "b s nh dm -> nh b s dm")
-        upstream_cache_clean[stage_cnt] = act_clean
-        upstream_cache_corr[stage_cnt] = act_corr
+        upstream_cache_clean[idx:idx+model.cfg.n_heads] = act_clean
+        upstream_cache_corr[idx:idx+model.cfg.n_heads] = act_corr
+        upstream_levels[idx:idx+model.cfg.n_heads] = stage_cnt
+        idx += model.cfg.n_heads
+        for i in range(model.cfg.n_heads):
+            head_name = name + str(i)
+            upstream_names.append(head_name)
     else:
-        upstream_cache_clean[stage_cnt] = clean_cache[name]
-        upstream_cache_corr[stage_cnt] = corrupted_cache[name]
-    upstream_idx.append(name)
+        upstream_cache_clean[idx] = clean_cache[name]
+        upstream_cache_corr[idx] = corrupted_cache[name]
+        upstream_levels[idx] = stage_cnt
+        idx += 1
+        upstream_names.append(name)
+
 upstream_diff = upstream_cache_corr - upstream_cache_clean
 
 #%% Get downstream_grad as matrix
+N_DOWNSTREAM_NODES = model.cfg.n_heads * 3 # q, k, v separate
 downstream_grad_cache_clean = t.zeros((
-    N_DOWNSTREAM_STAGES,
-    model.cfg.n_heads * 3, # q, k, v separate
+    N_TOTAL_DOWNSTREAM_NODES,
     BATCH_SIZE,
     SEQUENCE_LENGTH,
     model.cfg.d_model
 ))
 
-downstream_idx = []
+downstream_names = []
+downstream_levels = t.zeros(N_TOTAL_DOWNSTREAM_NODES)
 stage_cnt = 0
-for name in clean_grad_cache:
-    if name.endswith("hook_q_input"):
+idx = 0
+names = reversed(list(clean_grad_cache.keys()))
+for name in names:
+    if name.endswith("hook_q_input"): # do all q k v hooks of that layer simultaneously, as it is the same stage
         q_name = name
         k_name = name[:-7] + "k_input"
         v_name = name[:-7] + "v_input"
         q_act = einops.rearrange(clean_grad_cache[q_name], "b s nh dm -> nh b s dm")
         k_act = einops.rearrange(clean_grad_cache[k_name], "b s nh dm -> nh b s dm")
         v_act = einops.rearrange(clean_grad_cache[v_name], "b s nh dm -> nh b s dm")
-        qkv_stack = t.vstack((q_act, k_act, v_act))
-        downstream_grad_cache_clean[stage_cnt] = qkv_stack
-        downstream_idx.append(name[:-7] + "qkv_input")
+
+        downstream_grad_cache_clean[idx: idx+model.cfg.n_heads] = q_act
+        downstream_levels[idx: idx+model.cfg.n_heads] = stage_cnt
+        idx += model.cfg.n_heads
+        for i in range(model.cfg.n_heads):
+            head_name = q_name + str(i)
+            downstream_names.append(head_name)
+        
+        downstream_grad_cache_clean[idx: idx+model.cfg.n_heads] = k_act
+        downstream_levels[idx: idx+model.cfg.n_heads] = stage_cnt
+        idx += model.cfg.n_heads
+        for i in range(model.cfg.n_heads):
+            head_name = k_name + str(i)
+            downstream_names.append(head_name)
+
+        downstream_grad_cache_clean[idx: idx+model.cfg.n_heads] = v_act
+        downstream_levels[idx: idx+model.cfg.n_heads] = stage_cnt
+        idx += model.cfg.n_heads
+        for i in range(model.cfg.n_heads):
+            head_name = v_name + str(i)
+            downstream_names.append(head_name)
+
     elif name.endswith(("hook_k_input", "hook_v_input")):
         continue
     else:
-        downstream_grad_cache_clean[stage_cnt] = clean_grad_cache[name]
-        downstream_idx.append(name)
+        downstream_grad_cache_clean[idx] = clean_grad_cache[name]
+        downstream_levels[idx] = stage_cnt
+        idx += 1
+        downstream_names.append(name)
     stage_cnt += 1
 
-# Calculate the cartesian product of stage, node for upstream and downstream
-eap = einops.einsum(
+#%% Calculate the cartesian product of stage, node for upstream and downstream
+eap_scores = einops.einsum(
     upstream_diff, 
     downstream_grad_cache_clean,
-    "up_stages up_nodes batch seq d_model, down_stages down_nodes batch seq d_model -> up_stages up_nodes down_stages down_nodes"
+    "up_nodes batch seq d_model, down_nodes batch seq d_model -> up_nodes down_nodes"
 )
-eap.shape
 
-# TODO Check broadcasted stuff, maybe extra dimension for q,k,v in downstream nodes?
-# TODO Make explicit only upstream -> downstream (not downstream -> upstream is important)
 
+
+#%% Make explicit only upstream -> downstream (not downstream -> upstream is important)
+upstream_level_matrix = einops.repeat(upstream_levels, "up_nodes -> up_nodes down_nodes", down_nodes=N_TOTAL_DOWNSTREAM_NODES)
+downstream_level_matrix = einops.repeat(downstream_levels, "down_nodes -> up_nodes down_nodes", up_nodes=N_TOTAL_UPSTREAM_NODES)
+mask = upstream_level_matrix > downstream_level_matrix
+eap_scores = eap_scores.masked_fill(mask, value=t.nan)
+
+px.imshow(
+    eap_scores,
+    x=downstream_names,
+    y=upstream_names,
+    labels = dict(x="downstream node", y="upstream node", color="EAP score"),
+    color_continuous_scale="RdBu",
+    color_continuous_midpoint=0
+)
 # %%
