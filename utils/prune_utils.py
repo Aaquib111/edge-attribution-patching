@@ -184,7 +184,7 @@ def acdc_nodes(model: HookedTransformer,
     exp: TLACDCExperiment,
     verbose: bool = False,
     attr_absolute_val: bool = False,
-    mode: Literal["node", "edge"]="node",
+    mode: Literal["node", "edge", "edge_activation_patching"]="node",
 ) -> Dict: # TODO label this dict more precisely for the edge vs node methods
     '''
     Runs attribution-patching-based ACDC on the model, using the given metric and data.
@@ -246,17 +246,16 @@ def acdc_nodes(model: HookedTransformer,
                     remove_node(exp, node)
         return pruned_nodes_attr
     
-    elif mode == "edge":
+    elif mode.startswith("edge"):
         # Setup the upstream components
         relevant_nodes: List = [node for node in exp.corr.nodes() if node.incoming_edge_type in [EdgeType.ADDITION, EdgeType.DIRECT_COMPUTATION]]
-
         results: Dict[Tuple[ModelComponent, ModelComponent], float] = {} # We use a list of floats as we may be splitting by position
-        
+
         for relevant_node in tqdm(relevant_nodes, desc="Edge pruning"): # TODO ideally we should batch compute things in this loop
             parents = set([ModelComponent(hook_point_name=node.name, index=node.index, incoming_edge_type=str(node.incoming_edge_type)) for node in relevant_node.parents])
             downstream_component = ModelComponent(hook_point_name=relevant_node.name, index=relevant_node.index, incoming_edge_type=str(relevant_node.incoming_edge_type))
             for parent in parents:
-                if "." in parent.hook_point_name and "." in downstream_component.hook_point_name: # hook_embed and hook_pos_embed have no . but should always be connected anyway
+                if "." in parent.hook_point_name and "." in downstream_component.hook_point_name: # hook_embed and hook_pos_embed have no "." but should always be connected anyway
                     upstream_layer = int(parent.hook_point_name.split(".")[1])
                     downstream_layer = int(downstream_component.hook_point_name.split(".")[1])
                     if upstream_layer > downstream_layer:
@@ -265,25 +264,43 @@ def acdc_nodes(model: HookedTransformer,
                         # Other cases where upstream is actually after downstream!
                         continue
 
-                print(f'Pruning {parent=} {downstream_component=}')
-                fwd_cache_hook_name = parent.hook_point_name if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.hook_point_name
-                fwd_cache_index = parent.index if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.index
-                current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[fwd_cache_hook_name][fwd_cache_index.as_index] - corrupted_cache[fwd_cache_hook_name][fwd_cache_index.as_index])).sum()
+                if mode == "edge_activation_patching":
+                    # Compute the activation patching for this current node
+                    # OK so first try to just keep all the SHIT in memory
+                    # (This is done by default by the caching solution)
+                    # Then, after that, if we want to cram on more machines, be better!
+
+                    def my_current_hook(act, hook):
+                        act[downstream_component.index] = corrupted_cache[parent.hook_point_name][parent.index.as_index]
+                        return act
+
+                    # Get metric from model, while adding the hook at downstream_component.name 
+
+                else:
+                    print(f'Pruning {parent=} {downstream_component=}')
+                    fwd_cache_hook_name = parent.hook_point_name if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.hook_point_name
+                    fwd_cache_index = parent.index if downstream_component.incoming_edge_type == str(EdgeType.ADDITION) else downstream_component.index
+                    current_result = (clean_grad_cache[downstream_component.hook_point_name][downstream_component.index.as_index] * (clean_cache[fwd_cache_hook_name][fwd_cache_index.as_index] - corrupted_cache[fwd_cache_hook_name][fwd_cache_index.as_index])).sum()
 
                 if attr_absolute_val: 
                     current_result = current_result.abs()
                 results[parent, downstream_component] = current_result.item()
-
                 # for position in exp.positions: # TODO add this back in!
-                should_prune = current_result < threshold
-                if should_prune:
-                    edge_tuple = (downstream_component.hook_point_name, downstream_component.index, parent.hook_point_name, parent.index)
-                    exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
-                    exp.corr.remove_edge(*edge_tuple)
+
+                if mode == "edge_activation_patching":
+                    pass
 
                 else:
-                    if verbose: # Putting this here since tons of things get pruned when doing edges!
-                        print(f'NOT PRUNING {parent=} {downstream_component=} with attribution {current_result}')
+                    edge_tuple = (downstream_component.hook_point_name, downstream_component.index, parent.hook_point_name, parent.index)
+                    should_prune = current_result < threshold
+
+                    if should_prune:
+                        exp.corr.edges[edge_tuple[0]][edge_tuple[1]][edge_tuple[2]][edge_tuple[3]].present = False
+                        exp.corr.remove_edge(*edge_tuple)
+
+                    else:
+                        if verbose: # Putting this here since tons of things get pruned when doing edges!
+                            print(f'NOT PRUNING {parent=} {downstream_component=} with attribution {current_result}')
             t.cuda.empty_cache()
         return results
     
