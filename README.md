@@ -5,11 +5,11 @@ This repository is currently under development. It is built on top of https://gi
 Please cite this work as:
 ```
 @inproceedings{
-anonymous2023attribution,
-title={Attribution Patching Outperforms Automated Circuit Discovery},
-author={Anonymous},
-booktitle={NeurIPS Workshop on Attributing Model Behavior at Scale},
-year={2023},
-url={https://openreview.net/forum?id=tiLbFR4bJW}
+  syed2023attribution,
+  title={Attribution Patching Outperforms Automated Circuit Discovery},
+  author={Aaquib Syed and Can Rager and Arthur Conmy},
+  booktitle={NeurIPS Workshop on Attributing Model Behavior at Scale},
+  year={2023},
+  url={https://openreview.net/forum?id=tiLbFR4bJW}
 }
 ```
