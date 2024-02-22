@@ -1,6 +1,7 @@
 # Edge Attribution Patching
 
-Use the `minimal-implementation` branch for an easy-to-use version of edge attribution patching!
+Use the `minimal-implementation` branch for an easy-to-use version of edge attribution patching! All code in the minimal_implementation branch has been created by [Oscar Balcells](https://github.com/obalcells).
+
 
 
 This repository is currently under development. It is built on top of https://github.com/neelnanda-io/TransformerLens which we may merge into eventually. 
